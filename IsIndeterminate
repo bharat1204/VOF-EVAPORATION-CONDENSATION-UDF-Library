@@ -1,0 +1,15 @@
+#include "udf.h"
+#include "sg.h"
+#include "sg_vof.h"
+#include "cxbool.h"
+
+extern void
+IsIndeterminate(double x, cxboolean *IND) 
+{
+	*IND = FALSE;
+     if (x != x)
+	 {
+		 *IND = TRUE;
+	 }
+	 return;
+}    
