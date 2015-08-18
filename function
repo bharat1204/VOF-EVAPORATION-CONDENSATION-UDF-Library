@@ -1,0 +1,464 @@
+
+#include "udf.h"
+#include "sg.h"
+#include "sg_vof.h"
+#include "cxbool.h"
+
+
+extern void
+G_fun(cell_t c, Thread *t, real theta, real *Gfun)
+{
+/*	Constructs approximation to interface shape. Interface is
+    plane surface surface in each cell.  Unit normal is constructed
+    from liquid volume fraction profile.
+    also see the G-function of Pucket et al. (JCP, 130, 269-282, 1997)	*/
+	
+	cell_t cr, cf, cl, ca, crf, cra, clf, cla ;
+	Thread *tf, *ta, *tr, *tl, *trf, *tra, *tlf, *tla ;
+	face_t fr,ff,fl,fa,ffr,far,ffl,fal,flfl,frfl,frfr,frff,fraf,fraa;
+	Thread *tfr, *tff, *tfl, *tfa, *tffr, *tfar, *tffl, *tfal, *tflfl, *tfrfl, *tfrfr, *tfrff, *tfraf, *tfraa;
+	Thread *t_f, *t_fr, *t_ff, *t_fl, *t_fa;
+	
+	Thread *t_liquid = THREAD_SUB_THREAD(t,0);
+	
+	real dx, dy;
+	real nx , ny , normalx , normaly , dvol ;
+    real voll, voidll, dvoid ;
+	real xi, yi ;
+    real lenij ;
+    real xc[ND_ND], xci[ND_ND], xfrfr[ND_ND], xfrfl[ND_ND], xffr[ND_ND], xfar[ND_ND], xffl[ND_ND], xflfl[ND_ND], xfrff[ND_ND], xfraf[ND_ND], xfraa[ND_ND];
+	real dxc, dyc, dxrf, dyrf, dxlf, dylf, dxra, dyra ;
+	int rr, cc, n, N;
+	real xp, xpm, xm, xmm, yp, ypm, ym, ymm;
+	real len;
+
+	cxboolean check;
+	cxboolean check_r ;
+	cxboolean check_f ;
+	cxboolean check_l ;
+	cxboolean check_a ;
+	
+	check   = FALSE;
+	check_r = FALSE;
+	check_f = FALSE;
+	check_l = FALSE;
+	check_a = FALSE;
+	
+	C_CENTROID(xc,c,t);
+
+	delta( c, t_liquid, &dx, &dy );
+
+	
+	len = C_UDMI(c,t,4);		// slen[c];										// REVISED !!!!!
+
+	nx = cos(theta);
+    ny = sin(theta);
+
+	xi = xc[0] - len * nx ;
+    yi = xc[1] - len * ny ;
+	dvol = dx*dy;
+	(*Gfun) = 0.0;
+
+
+	
+	t_f = C_FACE_THREAD(c,t,0);
+	if( BOUNDARY_FACE_THREAD_P(t_f) )
+	{
+												// BOUNDARY CELLS ARE NOT CONSIDERED HERE. LATER ON IT MAY BE REQUIRED.
+	}
+	else
+	{
+		
+	(fr) = C_FACE(c,t,1);
+	(tfr) = C_FACE_THREAD(c,t,1);
+	(fl) = C_FACE(c,t,3);					/* --------------------- FOR ---------------------- */
+	(tfl) = C_FACE_THREAD(c,t,3);			/* ------------------ INTERIOR -------------------- */ 
+	(ff) = C_FACE(c,t,2);					/* -------------------- CELLS --------------------- */
+	(tff) = C_FACE_THREAD(c,t,2);
+	(fa) = C_FACE(c,t,0);
+	(tfa) = C_FACE_THREAD(c,t,0);
+
+		/* ----------- RIGHT FACE ----------- */
+
+		(cr) = F_C0((fr),(tfr));
+		if((cr) == c)
+		{
+			(cr) = F_C1((fr),(tfr));
+
+			(tr) = F_C1_THREAD((fr),(tfr));
+
+		}
+		else
+		{
+
+			(tr) = F_C0_THREAD((fr),(tfr));
+
+		}   
+
+		/* ----------- LEFT FACE ------------ */
+
+		(cl) = F_C0((fl),(tfl));
+		if((cl) == c)
+		{
+			(cl) = F_C1((fl),(tfl));
+			(tl) = F_C1_THREAD((fl),(tfl));
+		}
+		else
+		{
+			(tl) = F_C0_THREAD((fl),(tfl));
+		}
+
+		/* ----------- FRONT FACE ------------ */
+
+		(cf) = F_C0((ff),(tff));
+		if((cf) == c)
+		{
+			(cf) = F_C1((ff),(tff));
+
+			(tf) = F_C1_THREAD((ff),(tff));
+
+		}
+		else
+		{
+
+			(tf) = F_C0_THREAD((ff),(tff));
+		}
+
+
+		/* ------------ AFTER FACE ------------ */
+
+		(ca) = F_C0((fa),(tfa));
+		if((ca) == c)
+		{
+			(ca) = F_C1((fa),(tfa));
+			(ta) = F_C1_THREAD((fa),(tfa));
+		}
+		else
+		{
+			(ta) = F_C0_THREAD((fa),(tfa));
+		}
+
+
+		c_face_loop((cr),(tr),N)
+		{
+			t_fr = C_FACE_THREAD((cr),(tr),N);
+			if( BOUNDARY_FACE_THREAD_P(t_fr) )
+			{
+				check_r = TRUE;
+			}
+		}
+
+		c_face_loop((cf),(tf),N)
+		{
+			t_ff = C_FACE_THREAD((cf),(tf),N);
+			if( BOUNDARY_FACE_THREAD_P(t_ff) )
+			{
+				check_f = TRUE;
+			}
+		}
+
+		c_face_loop((cl),(tl),N)
+		{
+			t_fl = C_FACE_THREAD((cl),(tl),N);
+			if( BOUNDARY_FACE_THREAD_P(t_fl) )
+			{
+				check_l = TRUE;
+			}
+		}
+
+		c_face_loop((ca),(ta),N)
+		{
+			t_fa = C_FACE_THREAD((ca),(ta),N);
+			if( BOUNDARY_FACE_THREAD_P(t_fa) )
+			{
+				check_a = TRUE;
+			}
+		}				
+
+		if( check_r  || check_f  || check_l  || check_a  )
+		{
+			//			BOUNDARY CELLS ARE NOT CONSIDERED HERE.
+//			Message(" BOUNDARY CELL ENCOUNTERED \n ");
+
+		}
+		else
+		{
+		/* ============== DEFINITION OF SECONDARY NEIGHBOURS ============== */
+
+ 
+			(ffr) = C_FACE((cr),(tr),2);
+			(tffr) = C_FACE_THREAD((cr),(tr),2);
+
+			(far) = C_FACE((cr),(tr),0);
+			(tfar) = C_FACE_THREAD((cr),(tr),0);
+
+			(ffl) = C_FACE((cl),(tl),2);
+			(tffl) = C_FACE_THREAD((cl),(tl),2);
+
+			(fal) = C_FACE((cl),(tl),0);
+			(tfal) = C_FACE_THREAD((cl),(tl),0);
+
+//			Message("far, tfar, ffl, tffl, fal, tfal = %u %u %u %u %u %u \n", far, tfar, ffl, tffl, fal, tfal);
+
+
+
+		/* ======================== (crf,trf) ============================= */
+
+			(crf) = F_C0((ffr),(tffr));
+			if((crf) == (cr))
+			{
+				(crf) = F_C1((ffr),(tffr));
+				(trf) = F_C1_THREAD((ffr),(tffr));
+			}
+			else
+			{
+				(trf) = F_C0_THREAD((ffr),(tffr));
+			}
+	//		Message(" crf = %u \n ", crf);
+		/* ======================== (cra,tra) ============================= */
+
+			(cra) = F_C0((far),(tfar));
+			if((cra) == (cr))
+			{
+				(cra) = F_C1((far),(tfar));
+				(tra) = F_C1_THREAD((far),(tfar));
+			}
+			else
+			{
+				(tra) = F_C0_THREAD((far),(tfar));
+			}
+	//		Message(" cra = %u \n ", cra);	
+		/* ======================== (clf,tlf) ============================= */
+
+			(clf) = F_C0((ffl),(tffl));
+			if((clf) == (cl))
+			{
+				(clf) = F_C1((ffl),(tffl));
+				(tlf) = F_C1_THREAD((ffl),(tffl));
+			}
+			else
+			{
+				(tlf) = F_C0_THREAD((ffl),(tffl));
+			}
+	//		Message(" clf = %u \n ", clf);
+		/* ======================== (cla,tla) ============================= */
+
+			(cla) = F_C0((fal),(tfal));
+			if((cla) == (cl))
+			{
+				(cla) = F_C1((fal),(tfal));
+				(tla) = F_C1_THREAD((fal),(tfal));
+			}
+			else
+			{
+				(tla) = F_C0_THREAD((fal),(tfal));
+			}
+
+
+
+			
+	for (rr = -1; rr <= 1; ++rr)								// REVISED !!!!!
+		for (cc = -1; cc <= 1; ++cc)							// REVISED !!!!!
+		{
+			if( rr == 1 && cc == -1 )
+			{
+				C_CENTROID(xci,clf,tlf);
+				
+				dxc = xc[0] - xci[0];
+				dyc = xc[1] - xci[1];
+				C_UDMI(clf,t,4) = len - dxc*nx - dyc*ny ;
+				C_UDMI(clf,t,2) = nx;
+				C_UDMI(clf,t,3) = ny;
+				
+			}
+			else if( rr == 1 && cc == 0 )
+			{	
+				C_CENTROID(xci,cf,tf);
+
+				dxc = xc[0] - xci[0];
+				dyc = xc[1] - xci[1];
+				C_UDMI(cf,t,4) = len - dxc*nx - dyc*ny ;
+				C_UDMI(cf,t,2) = nx;
+				C_UDMI(cf,t,3) = ny;
+			}
+			else if( rr == 1 && cc == 1 )
+			{
+				C_CENTROID(xci,crf,trf);
+
+				dxc = xc[0] - xci[0];
+				dyc = xc[1] - xci[1];
+				C_UDMI(crf,t,4) = len - dxc*nx - dyc*ny ;
+				C_UDMI(crf,t,2) = nx;
+				C_UDMI(crf,t,3) = ny;
+			}
+			else if( rr == 0 && cc == -1 )
+			{
+				C_CENTROID(xci,cl,tl);
+
+				dxc = xc[0] - xci[0];
+				dyc = xc[1] - xci[1];
+				C_UDMI(cl,t,4) = len - dxc*nx - dyc*ny ;
+				C_UDMI(cl,t,2) = nx;
+				C_UDMI(cl,t,3) = ny;
+			}
+			else if( rr == 0 && cc == 0 )
+			{
+				goto SUPERMAN;
+			}
+			else if( rr == 0 && cc == 1 )
+			{	
+				C_CENTROID(xci,cr,tr);
+
+				dxc = xc[0] - xci[0];
+				dyc = xc[1] - xci[1];
+				C_UDMI(cr,t,4) = len - dxc*nx - dyc*ny ;
+				C_UDMI(cr,t,2) = nx;
+				C_UDMI(cr,t,3) = ny;
+			}
+			else if( rr == - 1 && cc == - 1 )
+			{
+				C_CENTROID(xci,cla,tla);
+
+				dxc = xc[0] - xci[0];
+				dyc = xc[1] - xci[1];
+				C_UDMI(cla,t,4) = len - dxc*nx - dyc*ny ;
+				C_UDMI(cla,t,2) = nx;
+				C_UDMI(cla,t,3) = ny;
+			}
+			else if( rr == - 1 && cc == 0 )
+			{
+				C_CENTROID(xci,ca,ta);
+
+				dxc = xc[0] - xci[0];
+				dyc = xc[1] - xci[1];
+				C_UDMI(ca,t,4) = len - dxc*nx - dyc*ny ;
+				C_UDMI(ca,t,2) = nx;
+				C_UDMI(ca,t,3) = ny;
+			}
+			else if( rr == - 1 && cc == 1 )
+			{
+				C_CENTROID(xci,cra,tra);
+
+				dxc = xc[0] - xci[0];
+				dyc = xc[1] - xci[1];
+				C_UDMI(cra,t,4) = len - dxc*nx - dyc*ny ;
+				C_UDMI(cra,t,2) = nx;
+				C_UDMI(cra,t,3) = ny;
+			}
+			
+			
+			
+
+			frfr = C_FACE(crf, trf, 1);
+			tfrfr = C_FACE_THREAD(crf, trf, 1);
+
+			frfl = C_FACE(crf, trf, 3);
+			tfrfl = C_FACE_THREAD(crf, trf, 3);
+			
+			frff = C_FACE(crf, trf, 2);
+			tfrff = C_FACE_THREAD(crf, trf, 2);
+			
+			ffr = C_FACE(crf, trf, 0);
+			tffr = C_FACE_THREAD(crf, trf, 0);
+			
+			ffl = C_FACE(cf, tf, 3);
+			tffl = C_FACE_THREAD(cf, tf, 3);
+			
+			flfl = C_FACE(clf, tlf, 3);
+			tflfl = C_FACE_THREAD(clf, tlf, 3);
+
+			fraf = C_FACE(cr, tr, 0);
+			tfraf = C_FACE_THREAD(cr, tr, 0);
+
+			fraa = C_FACE(cra, tra, 0);
+			tfraa = C_FACE_THREAD(cra, tra, 0);
+
+			F_CENTROID(xfrfr,frfr, tfrfr);
+			F_CENTROID(xfrfl,frfl, tfrfl);
+			F_CENTROID(xffl,ffl, tffl);
+			F_CENTROID(xflfl,flfl, tflfl);
+			F_CENTROID(xfrff,frff, tfrff);
+			F_CENTROID(xffr,ffr, tffr);
+			F_CENTROID(xfraf,fraf, tfraf);
+			F_CENTROID(xfraa,fraa, tfraa);
+			
+		//	Message("xp, xmm, yp, ymm = %f %f %f %f \n", xp, xmm, yp, ymm);
+			
+
+			if ( rr == 1 && cc == - 1 )
+			{
+						if( clf == 1795 )
+						 {
+//							 Message(" 1,-1 clf, t_liquid, xflfl[0], xffl[0], xffr[1], xfrff[1] = %u %u %f %f %f %f \n", clf, t_liquid, xflfl[0], xffl[0], xffr[1], xfrff[1]);
+						 }
+
+				
+				lgvol( clf, t_liquid, xflfl[0], xffl[0], xffr[1], xfrff[1], &voll );
+				voidll = voll/dvol;
+				dvoid = C_VOF(clf,t_liquid) - voidll;
+//				Message(" 1,-1 voll = %f \n", voll);
+			}
+			else if ( rr == 1 && cc == 0 )
+			{
+//				Message(" 1,0 xffl[0], xfrfl[0], xffr[1], xfrff[1] = %f %f %f %f \n", xffl[0], xfrfl[0], xffr[1], xfrff[1]);
+				lgvol( cf, t_liquid, xffl[0], xfrfl[0], xffr[1], xfrff[1], &voll );
+				voidll = voll/dvol;
+				dvoid = C_VOF(cf,t_liquid) - voidll;
+//				Message(" 1,0 voll = %f \n", voll);
+			}
+			else if ( rr == 1 && cc == 1 )
+			{
+//				Message(" 1,1 xfrfl[0], xfrfr[0], xffr[1], xfrff[1] = %f %f %f %f \n", xfrfl[0], xfrfr[0], xffr[1], xfrff[1] );
+				lgvol( crf, t_liquid, xfrfl[0], xfrfr[0], xffr[1], xfrff[1], &voll );
+				voidll = voll/dvol;
+				dvoid = C_VOF(crf,t_liquid) - voidll;
+//				Message(" 1,1 voll = %f \n", voll);
+			}
+			else if ( rr == 0 && cc == - 1 )
+			{
+//				Message(" 0,-1  xflfl[0], xffl[0], xfraf[1], xffr[1] = %f %f %f %f \n", xflfl[0], xffl[0], xfraf[1], xffr[1]);
+				lgvol( cl, t_liquid, xflfl[0], xffl[0], xfraf[1], xffr[1], &voll );
+				voidll = voll/dvol;
+				dvoid = C_VOF(cl,t_liquid) - voidll;
+//				Message(" 0,-1 voll = %f \n", voll);
+			}
+			else if ( rr == 0 && cc == 1 )
+			{
+//				Message(" 0,1  xfrfl[0], xfrfr[0], xfraf[1], xffr[1] = %f %f %f %f \n",  xfrfl[0], xfrfr[0], xfraf[1], xffr[1]);
+				lgvol( cr, t_liquid, xfrfl[0], xfrfr[0], xfraf[1], xffr[1], &voll );
+				voidll = voll/dvol;
+				dvoid = C_VOF(cr,t_liquid) - voidll;
+//				Message(" 0,1 voll = %f \n", voll);
+			}
+			else if ( rr == -1 && cc == - 1 )
+			{
+//				Message(" -1,-1 xflfl[0], xffl[0], xfraa[1], xfraf[1] = %f %f %f %f \n", xflfl[0], xffl[0], xfraa[1], xfraf[1]);
+				lgvol( cla, t_liquid, xflfl[0], xffl[0], xfraa[1], xfraf[1], &voll );
+				voidll = voll/dvol;
+				dvoid = C_VOF(cla,t_liquid) - voidll;
+//				Message(" -1,-1 voll = %f \n", voll);
+			}
+			else if ( rr == - 1 && cc == 0 )
+			{
+//				Message(" -1,0 xffl[0], xfrfl[0], xfraa[1], xfraf[1] = %f %f %f %f \n", xffl[0], xfrfl[0], xfraa[1], xfraf[1]);
+				lgvol( ca, t_liquid, xffl[0], xfrfl[0], xfraa[1], xfraf[1], &voll );
+				voidll = voll/dvol;
+				dvoid = C_VOF(ca,t_liquid) - voidll;
+//				Message(" -1,0 voll = %f \n", voll);
+			}
+			else if ( rr == - 1 && cc == 1 )
+			{
+//				Message(" -1,1 xfrfl[0], xfrfr[0], xfraa[1], xfraf[1] = %f %f %f %f \n", xfrfl[0], xfrfr[0], xfraa[1], xfraf[1]);
+				lgvol( cra, t_liquid, xfrfl[0], xfrfr[0], xfraa[1], xfraf[1], &voll );
+				voidll = voll/dvol;
+				dvoid = C_VOF(cra,t_liquid) - voidll;
+//				Message(" -1,1 voll = %f \n", voll);
+			}
+			
+			(*Gfun) = (*Gfun) + dvoid*dvoid ;
+//			Message( "Gfun = %u %d %d %.15f %f \n", c, rr, cc, (*Gfun), dvoid );
+ SUPERMAN: ;
+		}
+	  }
+	}
+}	
