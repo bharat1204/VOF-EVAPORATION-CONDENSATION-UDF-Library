@@ -1,0 +1,674 @@
+
+#include "udf.h"
+#include "sg.h"
+#include "sg_vof.h"
+#include "cxbool.h"
+
+/*--------- chk_neighb() function ----------- */
+/*    This function checks whether for a given cell( i.e c,t)
+its neighbours in 3*3 matrix are liquid or vapour. It  retruns TRUE or FALSE value.
+  */
+// IMPORTANT NOTE: In This Macro Boundary cells are not considered. SO if we are not considering boundary cells then this part becomes grid geometry independent. 
+//  But if in future we include boundary cells as well then This part needs to be changed for different geometry.
+extern void 
+chk_neighb(cell_t c,Thread *t,int iphs,cxboolean *chk_phs )
+{
+	Thread *t_vapour = THREAD_SUB_THREAD(t,1);
+	/* =============== DECLARATION FOR NEIGHBOURING CELL  ================= */
+	cell_t cnb;
+	cell_t cr, cf, cl, ca, crf, cra, clf, cla ;
+	Thread *tf, *ta, *tr, *tl, *trf, *tra, *tlf, *tla ;
+
+	face_t fr,ff,fl,fa,ffr,far,ffl,fal,frp,flp,frm,flm;
+	Thread *tfr, *tff, *tfl, *tfa, *tffr, *tfar, *tffl, *tfal, *tfrp, *tflp, *tfrm, *tflm;
+	Thread *t_f;
+	Thread *t_fr, *t_ff, *t_fl, *t_fa;
+	Node *node;
+	int rr, cc, N,r,l,f,a, n;
+	real toll, tolg;
+	cxboolean check_r ;
+	cxboolean check_f ;
+	cxboolean check_l ;
+	cxboolean check_a ;
+
+	check_r = FALSE;
+	check_f = FALSE;
+	check_l = FALSE;
+	check_a = FALSE;
+	*chk_phs = TRUE;
+	/* ------------------------------------------------------------------------------------ */
+	
+
+//	chek_neighb(c, t, iphs) = TRUE;
+
+	/* ============================ NEIGHBOUR SEARCH PROGRAM ============================= */
+	
+	t_f = C_FACE_THREAD(c,t,0);
+	
+	if(BOUNDARY_FACE_THREAD_P(t_f))
+	{
+		/*
+			c_node_loop(c,t,n)
+	        {
+			  node = C_NODE(c,t,n);
+ 		 
+	
+				if( NODE_X(node) == 0 )
+				{
+					fr = C_FACE(c,t,2);
+					tfr = C_FACE_THREAD(c,t,2);
+					fl = C_FACE(c,t,0);					
+					tfl = C_FACE_THREAD(c,t,0);			
+					ff = C_FACE(c,t,3);					
+					tff = C_FACE_THREAD(c,t,3);
+					fa = C_FACE(c,t,1);
+					tfa = C_FACE_THREAD(c,t,1);
+				}
+
+				if( NODE_X(node)*1000000 == 1135 )
+				{
+					fr = C_FACE(c,t,0);
+					tfr = C_FACE_THREAD(c,t,0);
+					fl = C_FACE(c,t,2);					
+					tfl = C_FACE_THREAD(c,t,2);			
+					ff = C_FACE(c,t,1);					
+					tff = C_FACE_THREAD(c,t,1);
+					fa = C_FACE(c,t,3);
+					tfa = C_FACE_THREAD(c,t,3);
+				}
+
+				if( NODE_Y(node) == 0 )
+				{
+					fr = C_FACE(c,t,1);
+					tfr = C_FACE_THREAD(c,t,1);
+					fl = C_FACE(c,t,3);					
+					tfl = C_FACE_THREAD(c,t,3);			
+					ff = C_FACE(c,t,2);					
+					tff = C_FACE_THREAD(c,t,2);
+					fa = C_FACE(c,t,0);
+					tfa = C_FACE_THREAD(c,t,0);
+				}
+
+				if( NODE_Y(node)*100000 == 227 )
+				{
+					fr = C_FACE(c,t,3);
+					tfr = C_FACE_THREAD(c,t,3);
+					fl = C_FACE(c,t,1);					
+					tfl = C_FACE_THREAD(c,t,1);			
+					ff = C_FACE(c,t,0);					
+					tff = C_FACE_THREAD(c,t,0);
+					fa = C_FACE(c,t,2);
+					tfa = C_FACE_THREAD(c,t,2);
+				}		
+			}
+			*/
+	}
+	else
+	{
+				fr = C_FACE(c,t,1);
+				tfr = C_FACE_THREAD(c,t,1);
+				fl = C_FACE(c,t,3);					/* --------------------- FOR ---------------------- */
+				tfl = C_FACE_THREAD(c,t,3);			/* ------------------ INTERIOR -------------------- */ 
+				ff = C_FACE(c,t,2);					/* -------------------- CELLS --------------------- */
+				tff = C_FACE_THREAD(c,t,2);
+				fa = C_FACE(c,t,0);
+				tfa = C_FACE_THREAD(c,t,0);
+
+	
+			/* ----------- RIGHT FACE ----------- */
+
+				cr = F_C0(fr,tfr);
+				if(cr == c)
+				{
+					cr = F_C1(fr,tfr);
+					tr = F_C1_THREAD(fr,tfr);
+				}
+				else
+				{
+					tr = F_C0_THREAD(fr,tfr);
+				}   
+
+			/* ----------- LEFT FACE ------------ */
+
+				cl = F_C0(fl,tfl);
+				if(cl == c)
+				{
+					cl = F_C1(fl,tfl);
+					tl = F_C1_THREAD(fl,tfl);
+				}
+				else
+				{
+					tl = F_C0_THREAD(fl,tfl);
+				}
+
+			/* ----------- FRONT FACE ------------ */
+
+				cf = F_C0(ff,tff);
+				if(cf == c)
+				{
+					cf = F_C1(ff,tff);
+					tf = F_C1_THREAD(ff,tff);
+				}
+				else
+				{
+					tf = F_C0_THREAD(ff,tff);
+				}
+
+			/* ------------ AFTER FACE ------------ */
+
+				ca = F_C0(fa,tfa);
+				if(ca == c)
+				{
+					ca = F_C1(fa,tfa);
+					ta = F_C1_THREAD(fa,tfa);
+				}
+				else
+				{
+					ta = F_C0_THREAD(fa,tfa);
+				}
+		//		Message(" ca = %u \n ", ca);
+		//	}
+	
+				c_face_loop(cr,tr,N)
+				{
+					t_fr = C_FACE_THREAD(cr,tr,N);
+					if( BOUNDARY_FACE_THREAD_P(t_fr) )
+					{
+						check_r = TRUE;
+					}
+				}
+
+				c_face_loop(cf,tf,N)
+				{
+					t_ff = C_FACE_THREAD(cf,tf,N);
+					if( BOUNDARY_FACE_THREAD_P(t_ff) )
+					{
+						check_f = TRUE;
+					}
+				}
+
+				c_face_loop(cl,tl,N)
+				{
+					t_fl = C_FACE_THREAD(cl,tl,N);
+					if( BOUNDARY_FACE_THREAD_P(t_fl) )
+					{
+						check_l = TRUE;
+					}
+				}
+
+				c_face_loop(ca,ta,N)
+				{
+					t_fa = C_FACE_THREAD(ca,ta,N);
+					if( BOUNDARY_FACE_THREAD_P(t_fa) )
+					{
+						check_a = TRUE;
+					}
+				}				
+
+		if( check_r )
+		{
+//			Message(" BOUNDARY CELL ENCOUNTERED \n ");
+			
+
+				ffr = C_FACE(cr,tr,1);
+				tffr = C_FACE_THREAD(cr,tr,1);
+
+				far = C_FACE(cr,tr,3);
+				tfar = C_FACE_THREAD(cr,tr,3);
+
+				ffl = C_FACE(cl,tl,2);
+				tffl = C_FACE_THREAD(cl,tl,2);
+
+				fal = C_FACE(cl,tl,0);
+				tfal = C_FACE_THREAD(cl,tl,0);
+
+			/* ======================== (crf,trf) ============================= */
+
+				crf = F_C0(ffr,tffr);
+				if(crf == cr)
+				{
+					crf = F_C1(ffr,tffr);
+					trf = F_C1_THREAD(ffr,tffr);
+				}
+				else
+				{
+					trf = F_C0_THREAD(ffr,tffr);
+				}
+	//			Message(" crf = %u \n ", crf);
+			/* ======================== (cra,tra) ============================= */
+
+				cra = F_C0(far,tfar);
+				if(cra == cr)
+				{
+					cra = F_C1(far,tfar);
+					tra = F_C1_THREAD(far,tfar);
+				}
+				else
+				{
+					tra = F_C0_THREAD(far,tfar);
+				}
+	//			Message(" cra = %u \n ", cra);	
+			/* ======================== (clf,tlf) ============================= */
+
+				clf = F_C0(ffl,tffl);
+				if(clf == cl)
+				{
+					clf = F_C1(ffl,tffl);
+					tlf = F_C1_THREAD(ffl,tffl);
+				}
+				else
+				{
+					tlf = F_C0_THREAD(ffl,tffl);
+				}
+	//			Message(" clf = %u \n ", clf);
+			/* ======================== (cla,tla) ============================= */
+
+				cla = F_C0(fal,tfal);
+				if(cla == cl)
+				{
+					cla = F_C1(fal,tfal);
+					tla = F_C1_THREAD(fal,tfal);
+				}
+				else
+				{
+					tla = F_C0_THREAD(fal,tfal);
+				}
+	//			Message(" cla = %u \n ", cla);
+		
+		}
+		else if ( check_f )
+		{
+			
+				frp = C_FACE(cf,tf,3);
+				tfrp = C_FACE_THREAD(cf,tf,3);
+
+				flp = C_FACE(cf,tf,1);
+				tflp = C_FACE_THREAD(cf,tf,1);
+
+				frm = C_FACE(ca,ta,1);
+				tfrm = C_FACE_THREAD(ca,ta,1);
+
+				flm = C_FACE(ca,ta,3);
+				tflm = C_FACE_THREAD(ca,ta,3);
+
+			/* ======================== (crf,trf) ============================= */
+
+				crf = F_C0(frp,tfrp);
+				if(crf == cr)
+				{
+					crf = F_C1(frp,tfrp);
+					trf = F_C1_THREAD(frp,tfrp);
+				}
+				else
+				{
+					trf = F_C0_THREAD(frp,tfrp);
+				}
+
+			/* ======================== (clf,tlf) ============================= */
+
+				clf = F_C0(flp,tflp);
+				if(clf == cl)
+				{
+					clf = F_C1(flp,tflp);
+					tlf = F_C1_THREAD(flp,tflp);
+				}
+				else
+				{
+					tlf = F_C0_THREAD(flp,tflp);
+				}
+
+			/* ======================== (cra,tra) ============================= */
+
+				cra = F_C0(frm,tfrm);
+				if(cra == cr)
+				{
+					cra = F_C1(frm,tfrm);
+					tra = F_C1_THREAD(frm,tfrm);
+				}
+				else
+				{
+					tra = F_C0_THREAD(frm,tfrm);
+				}
+
+			/* ======================== (cla,tla) ============================= */
+
+				cla = F_C0(flm,tflm);
+				if(cla == cl)
+				{
+					cla = F_C1(flm,tflm);
+					tla = F_C1_THREAD(flm,tflm);
+				}
+				else
+				{
+					tla = F_C0_THREAD(flm,tflm);
+				}
+			
+		}
+		else if ( check_l ) 
+		{
+			
+				ffl = C_FACE(cl,tl,3);
+				tffl = C_FACE_THREAD(cl,tl,3);
+
+				fal = C_FACE(cl,tl,1);
+				tfal = C_FACE_THREAD(cl,tl,1);
+
+				ffr = C_FACE(cr,tr,2);
+				tffr = C_FACE_THREAD(cr,tr,2);
+
+				far = C_FACE(cr,tr,0);
+				tfar = C_FACE_THREAD(cr,tr,0);
+
+			/* ======================== (crf,trf) ============================= */
+
+				crf = F_C0(ffr,tffr);
+				if(crf == cr)
+				{
+					crf = F_C1(ffr,tffr);
+					trf = F_C1_THREAD(ffr,tffr);
+				}
+				else
+				{
+					trf = F_C0_THREAD(ffr,tffr);
+				}
+	//			Message(" crf = %u \n ", crf);
+			/* ======================== (cra,tra) ============================= */
+
+				cra = F_C0(far,tfar);
+				if(cra == cr)
+				{
+					cra = F_C1(far,tfar);
+					tra = F_C1_THREAD(far,tfar);
+				}
+				else
+				{
+					tra = F_C0_THREAD(far,tfar);
+				}
+	//			Message(" cra = %u \n ", cra);	
+			/* ======================== (clf,tlf) ============================= */
+
+				clf = F_C0(ffl,tffl);
+				if(clf == cl)
+				{
+					clf = F_C1(ffl,tffl);
+					tlf = F_C1_THREAD(ffl,tffl);
+				}
+				else
+				{
+					tlf = F_C0_THREAD(ffl,tffl);
+				}
+	//			Message(" clf = %u \n ", clf);
+			/* ======================== (cla,tla) ============================= */
+
+				cla = F_C0(fal,tfal);
+				if(cla == cl)
+				{
+					cla = F_C1(fal,tfal);
+					tla = F_C1_THREAD(fal,tfal);
+				}
+				else
+				{
+					tla = F_C0_THREAD(fal,tfal);
+				}
+	//			Message(" cla = %u \n ", cla);
+		
+			
+		}
+		else if ( check_a )
+		{
+			
+				frm = C_FACE(ca,ta,1);
+				tfrm = C_FACE_THREAD(ca,ta,1);
+
+				flm = C_FACE(ca,ta,3);
+				tflm = C_FACE_THREAD(ca,ta,3);
+
+				frp = C_FACE(cf,tf,1);
+				tfrp = C_FACE_THREAD(cf,tf,1);
+
+				flp = C_FACE(cf,tf,3);
+				tflp = C_FACE_THREAD(cf,tf,3);
+			
+			/* ======================== (crf,trf) ============================= */
+
+				crf = F_C0(frp,tfrp);
+				if(crf == cr)
+				{
+					crf = F_C1(frp,tfrp);
+					trf = F_C1_THREAD(frp,tfrp);
+				}
+				else
+				{
+					trf = F_C0_THREAD(frp,tfrp);
+				}
+
+			/* ======================== (clf,tlf) ============================= */
+
+				clf = F_C0(flp,tflp);
+				if(clf == cl)
+				{
+					clf = F_C1(flp,tflp);
+					tlf = F_C1_THREAD(flp,tflp);
+				}
+				else
+				{
+					tlf = F_C0_THREAD(flp,tflp);
+				}
+
+			/* ======================== (cra,tra) ============================= */
+
+				cra = F_C0(frm,tfrm);
+				if(cra == cr)
+				{
+					cra = F_C1(frm,tfrm);
+					tra = F_C1_THREAD(frm,tfrm);
+				}
+				else
+				{
+					tra = F_C0_THREAD(frm,tfrm);
+				}
+
+			/* ======================== (cla,tla) ============================= */
+
+				cla = F_C0(flm,tflm);
+				if(cla == cl)
+				{
+					cla = F_C1(flm,tflm);
+					tla = F_C1_THREAD(flm,tflm);
+				}
+				else
+				{
+					tla = F_C0_THREAD(flm,tflm);
+				}
+		}
+		else
+		{
+/* ============== DEFINITION OF SECONDARY NEIGHBOURS ============== */
+
+ 
+			ffr = C_FACE(cr,tr,2);
+			tffr = C_FACE_THREAD(cr,tr,2);
+
+			far = C_FACE(cr,tr,0);
+			tfar = C_FACE_THREAD(cr,tr,0);
+
+			ffl = C_FACE(cl,tl,2);
+			tffl = C_FACE_THREAD(cl,tl,2);
+
+			fal = C_FACE(cl,tl,0);
+			tfal = C_FACE_THREAD(cl,tl,0);
+
+//		Message("  far, tfar, ffl, tffl, fal, tfal =  %u %u %u %u %u %u  \n ", far, tfar, ffl, tffl, fal, tfal); 
+
+		
+
+		/* ======================== (crf,trf) ============================= */
+
+			crf = F_C0(ffr,tffr);
+			if(crf == cr)
+			{
+				crf = F_C1(ffr,tffr);
+				trf = F_C1_THREAD(ffr,tffr);
+			}
+			else
+			{
+				trf = F_C0_THREAD(ffr,tffr);
+			}
+//			Message(" crf = %u \n ", crf);
+		/* ======================== (cra,tra) ============================= */
+
+			cra = F_C0(far,tfar);
+			if(cra == cr)
+			{
+				cra = F_C1(far,tfar);
+				tra = F_C1_THREAD(far,tfar);
+			}
+			else
+			{
+				tra = F_C0_THREAD(far,tfar);
+			}
+//			Message(" cra = %u \n ", cra);	
+		/* ======================== (clf,tlf) ============================= */
+
+			clf = F_C0(ffl,tffl);
+			if(clf == cl)
+			{
+				clf = F_C1(ffl,tffl);
+				tlf = F_C1_THREAD(ffl,tffl);
+			}
+			else
+			{
+				tlf = F_C0_THREAD(ffl,tffl);
+			}
+//			Message(" clf = %u \n ", clf);
+		/* ======================== (cla,tla) ============================= */
+
+			cla = F_C0(fal,tfal);
+			if(cla == cl)
+			{
+				cla = F_C1(fal,tfal);
+				tla = F_C1_THREAD(fal,tfal);
+			}
+			else
+			{
+				tla = F_C0_THREAD(fal,tfal);
+			}
+//			Message(" cla = %u \n ", cla);
+		
+		}
+	/* ------------------------ END OF NEIGHBOUR SEARCH PROGRAM ------------------------ */
+
+			if (iphs == 3)
+			{
+				for (rr = -1; rr < 1; rr++)
+				for (cc = -1; cc < 1; cc++)
+				{
+					if( rr == - 1 && cc == -1 )
+					{
+						cnb = clf;
+					}
+					else if( rr == - 1 && cc == 0 )
+					{	
+						cnb = cf;
+					}
+					else if( rr == - 1 && cc == 1 )
+					{
+						cnb = crf;
+					}
+					else if( rr == 0 && cc == -1 )
+					{
+						cnb = cl;
+					}
+					else if( rr == 0 && cc == 0 )
+					{
+					goto chkphs1;
+					}
+					else if( rr == 0 && cc == 1 )
+					{	
+						cnb = cr;
+					}
+					else if( rr ==  1 && cc == -1 )
+					{
+						cnb = cla;
+					}
+					else if( rr ==  1 && cc == 0 )
+					{
+						cnb = ca;
+					}
+					else if( rr ==  1 && cc == 1 )
+					{
+						cnb = cra;
+					}
+				
+					if (C_VOF(cnb,t_vapour) < 0.5)
+					{
+						*chk_phs = FALSE;
+						
+					}
+			
+			chkphs1: ;
+
+				}
+			}
+			else if (iphs == 1)
+			{
+				for (rr = -1; rr < 1; rr++)
+				for (cc = -1; cc < 1; cc++)
+				{
+					if( rr == - 1 && cc == -1 )
+					{
+						cnb = clf;
+					}
+					else if( rr == - 1 && cc == 0 )
+					{	
+						cnb = cf;
+					}
+					else if( rr == - 1 && cc == 1 )
+					{
+						cnb = crf;
+					}
+					else if( rr == 0 && cc == -1 )
+					{
+						cnb = cl;
+					}
+					else if( rr == 0 && cc == 0 )
+					{
+					goto chkphs2;
+					}
+					else if( rr == 0 && cc == 1 )
+					{	
+						cnb = cr;
+					}
+					else if( rr ==  1 && cc == -1 )
+					{
+						cnb = cla;
+					}
+					else if( rr ==  1 && cc == 0 )
+					{
+						cnb = ca;
+					}
+					else if( rr ==  1 && cc == 1 )
+					{
+						cnb = cra;
+					}
+				
+					if (C_VOF(cnb,t_vapour) > 0.5)
+					{
+						*chk_phs = FALSE;
+						
+					}
+			
+			chkphs2: ;
+
+				}
+			}
+	//		else
+	//		{
+	//			*chk_phs = TRUE;
+	//			return;
+	//		}
+		return;
+	}	
+	
+
+}
