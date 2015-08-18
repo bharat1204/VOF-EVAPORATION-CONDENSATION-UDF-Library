@@ -1,0 +1,220 @@
+
+#include "udf.h"
+#include "sg.h"
+#include "sg_vof.h"
+#include "cxbool.h"
+
+/*--------- lgvol function ----------- */
+/* This function Computes the liquid volume in the rectangle 
+      bounded by the four lines xl, xr, ya, and yf 
+      (xleft, xright, yaft, yfront)
+      The liquid-gas interface plane cuts through the rectangle at
+      a distance slen from the point (xc,yc).  slen is measured such
+      that slen*(nx,ny) + (xbase,ybase) = (xc,yc).
+      The normal to the interface plane (into the liquid phase) 
+      is (nx,ny). */
+
+extern void
+lgvol( cell_t c, Thread *t, real xl, real xr, real ya, real yf, real *voll )
+{
+	cell_t cr, cf, cl, ca, crf, cra, clf, cla ;
+	Thread *tf, *ta, *tr, *tl, *trf, *tra, *tlf, *tla ;
+
+	int n, nvert;
+	real xc[ND_ND];
+	real xi,  yi;
+	real xv1, xv2, yv1, yv2;
+	real tx,  ty, eps;
+	real xvert[5], yvert[5], slope , slopi;
+	real xint1, xint2, yint1, yint2;
+	real xtest, ytest, dot_prod;
+	real dot_prod_new, dot_prod_old;
+	real lenm1;
+	real len, nx, ny;
+	real voll_old, voll_new;
+	real var;
+	int iface_int1, iface_int2;
+	int iphs;
+
+	/*     iface_int = 1  - bottom edge
+                   2  - right edge
+                   3  - top edge
+                   4  - left edge     */
+       iface_int1 = 0;
+	   iface_int2 = 0;
+
+       eps = 0.000001;// any lower value 10-6
+
+       
+       C_CENTROID(xc,c,t);   
+
+      iphs = C_UDMI(c,t,1); 
+	  nx = C_UDMI(c,t,2);
+	  ny = C_UDMI(c,t,3);
+	  len = C_UDMI(c,t,4);
+	  	   
+	//  Message(" lgvol c, nx, ny = %u %f %f \n ", c, nx, ny);
+
+	   tx = -ny;
+       ty = nx;
+
+	   xi = xc[0] - len * nx;
+       yi = xc[1] - len * ny;
+
+	   linseg(  c, t, xl, xr, ya, yf, &xint1, &xint2, &yint1, &yint2, &iface_int1, &iface_int2  );
+	if( c == 1795 )
+	{
+//		Message(" c, t, xl, xr, ya, yf,xint1,xint2,yint1,yint2 = %u %u %.15f %.15f %.15f %.15f %.15f %.15f %.15f %.15f \n", c, t, xl, xr, ya, yf, xint1,xint2,yint1,yint2);
+	}
+	   
+	/*    if( iface_int1 == 0 && iface_int2 == 0 )
+		{
+			return ;
+		}			*/
+
+//		Message(" c, xint1, xint2, yint1, yint2, iface_int1, iface_int2 = %u %f %f %f %f %d %d \n" , c, xint1, xint2, yint1, yint2, iface_int1, iface_int2);
+	  
+	   /* find cell corners that are vertices */
+
+	   nvert = 0;
+
+	   /* bottom left corner */
+	   xtest = xl - xi ;
+       ytest = ya - yi ;
+       dot_prod = xtest*nx + ytest*ny;
+	   
+	      if (dot_prod >= 0.0 ) 
+          {
+				nvert = nvert + 1;
+				xvert[nvert-1] = xl;
+				yvert[nvert-1] = ya;
+		  }
+
+	   /* interface intersects bottom */
+		  if      (iface_int1 == 1 )
+			{
+				nvert = nvert + 1;
+				xvert[nvert-1] = xint1;
+				yvert[nvert-1] = yint1;
+			}
+		  else if (iface_int2 == 1 )
+			{
+				nvert = nvert + 1;
+				xvert[nvert-1] = xint2;
+				yvert[nvert-1] = yint2;
+			}
+		/* bottom right corner */
+				xtest = xr - xi; 
+				ytest = ya - yi;
+				dot_prod = xtest*nx + ytest*ny;
+       if (dot_prod >= 0.0 ) 
+			{
+				nvert = nvert + 1;
+				xvert[nvert-1] = xr;
+				yvert[nvert-1] = ya;
+			}
+
+       /* interface intersects right */
+
+       if      (iface_int1 == 2 ) 
+	   { 
+				nvert = nvert + 1;
+				xvert[nvert-1] = xint1;
+				yvert[nvert-1] = yint1;
+	   }
+       else if (iface_int2 == 2 ) 
+	   {
+			    nvert = nvert + 1;
+				xvert[nvert-1] = xint2;
+				yvert[nvert-1] = yint2;
+	   }
+
+	  /* top right corner */
+
+       xtest = xr - xi ;
+       ytest = yf - yi ;
+       dot_prod = xtest*nx + ytest*ny;
+       if (dot_prod >= 0.0 ) 
+	   {
+	//	   Message(" dot_prod2 = %f \n" , dot_prod);
+				nvert = nvert + 1;
+				xvert[nvert-1] = xr;
+				yvert[nvert-1] = yf;
+	   }
+
+	   /* interface intersects top */
+
+       if      (iface_int1 == 3 )
+	   {
+				nvert = nvert + 1;
+				xvert[nvert-1] = xint1;
+				yvert[nvert-1] = yint1;
+	   }
+       else if (iface_int2 == 3 )
+	   {
+				nvert = nvert + 1;
+				xvert[nvert-1] = xint2;
+				yvert[nvert-1] = yint2;
+	   }
+       
+
+		/* top left corner */
+
+       xtest = xl - xi ;
+       ytest = yf - yi;
+       dot_prod = xtest*nx + ytest*ny;
+       if (dot_prod >= 0.0 ) 
+	   {
+	//	   Message(" dot_prod3 = %f \n" , dot_prod);
+				 nvert = nvert + 1;
+				 xvert[nvert-1] = xl;
+				 yvert[nvert-1] = yf;
+	   }
+
+		/* interface intersects left */
+
+       if      (iface_int1 == 4 ) 
+	   {
+				nvert = nvert + 1;
+				xvert[nvert-1] = xint1;
+				yvert[nvert-1] = yint1;
+	   }
+       else if (iface_int2 == 4 ) 
+	   {
+			    nvert = nvert + 1;
+				xvert[nvert-1] = xint2;
+				yvert[nvert-1] = yint2;
+	   }
+
+//	   Message("xvert = %.15f %.15f %.15f %.15f %.15f \n", xvert[0], xvert[1], xvert[2], xvert[3], xvert[4] );
+//	   Message("yvert = %.15f %.15f %.15f %.15f %.15f \n", yvert[0], yvert[1], yvert[2], yvert[3], yvert[4] );
+	  (*voll) = 0.0;
+	
+	   for( n = 0; n <= (nvert-1); n++)			// ( n = 1; n < nvert; n++)											CHANGE FROM FORTRAN STYLE TO C STYLE.
+	   {
+          xv1 = xvert[n];
+          yv1 = yvert[n];
+		  
+          if ( n == (nvert-1) )
+		  {
+			  xv2 = xvert[0];
+              yv2 = yvert[0];
+		  }
+          else 
+		  {
+			  xv2 = xvert[n+1];
+              yv2 = yvert[n+1];
+		  }
+					
+
+//		  Message("nvert, xv1 ,xv2, yv1, yv2 = %d %.20f %.20f %.20f %.20f \n", nvert, xv1 ,xv2, yv1, yv2 );
+//		  var = (xv1*yv2 - xv2*yv1);// no use
+
+//		  Message(" n , (*voll) , var = %d %f %.30f \n \n \n ", n , (*voll) , var );  
+		  (*voll) = (*voll) + xv1*yv2 - xv2*yv1;
+		}
+	   
+	   (*voll) = 0.5*(*voll);  // why multiplied by 0.5?
+//		Message(" c, voll = %u %g \n ", c, (*voll) );
+	   return;
+}
