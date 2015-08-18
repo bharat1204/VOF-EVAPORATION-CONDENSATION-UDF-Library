@@ -1,0 +1,248 @@
+
+#include "udf.h"
+#include "sg.h"
+#include "sg_vof.h"
+#include "cxbool.h"
+
+/*--------- get_len function ----------- */
+/* This function uses SECANT ITERATIVE METHOD for calculating the value of 
+correct len(which is distance between midpoint of interface and the centroid of that cell) in a cell.
+Strategy is simple. Just use first two approximate values of len(here diagonals are used) then employe 
+SECANT method which should stop once void fraction estimated from this len value is matching with actual void fraction from 
+Fluent SOlver.   */
+
+// IMPORTANT NOTE: In This Macro Boundary cells are not considered. SO if we are not considering boundary cells then this part becomes grid geometry independent. 
+//  But if in future we include boundary cells as well then This part needs to be changed for different geometry.
+extern void
+get_len(cell_t c, Thread *t, real nx, real ny )
+{
+	/* ===========================	DECLARATION  ============================ */
+
+	face_t fr,ff,fl,fa;
+	Thread *tfr, *tff, *tfl, *tfa;
+	Thread *t_f;
+	Node *node;
+	int niter,itermx;
+	real voll;
+	int n, nvert,a;
+	real xr, yf, xl, ya, xc[ND_ND], XR[ND_ND], XF[ND_ND], XL[ND_ND], XA[ND_ND];
+	real dx,dy;
+
+	real leng , lenp1 , lenm1 , vdfm1 , vdf;
+	real ndiag1, ndiag2, mxslen, epslen;
+	real lvol, vol ;
+	real volume , err, errm1, denerr, void_t;
+	real toler;
+	real *ptl, *ptr, *pta, *ptf ;
+	real xi,  yi;
+	real xv1, xv2, yv1, yv2;
+	real tx,  ty, eps;
+	real xvert[5], yvert[5], slope , slopi;
+	real xint1, xint2, yint1, yint2;
+	real iface_int1, iface_int2 ;
+	real xtest, ytest, dot_prod;
+	real len;
+
+//	Message(" c, C_UDMI(c,t,7) = %u %f \n", c, C_UDMI(c,t,7) );
+
+	delta( c, t, &dx, &dy );
+//	nmx(c,t, &nx, &ny);
+	vol = dx*dy;
+
+	C_CENTROID(xc,c,t);
+		
+	t_f = C_FACE_THREAD(c,t,0);
+	
+		if(BOUNDARY_FACE_THREAD_P(t_f))
+		{
+			/*
+			c_node_loop(c,t,a)
+	        {
+			  node = C_NODE(c,t,a);
+ 		 
+	
+				if( NODE_X(node) == 0 )
+				{
+					fr = C_FACE(c,t,2);
+					tfr = C_FACE_THREAD(c,t,2);
+					fl = C_FACE(c,t,0);					
+					tfl = C_FACE_THREAD(c,t,0);			
+					ff = C_FACE(c,t,3);					
+					tff = C_FACE_THREAD(c,t,3);
+					fa = C_FACE(c,t,1);
+					tfa = C_FACE_THREAD(c,t,1);
+				}
+
+				if( NODE_X(node)*1000000 == 1135 )
+				{
+					fr = C_FACE(c,t,0);
+					tfr = C_FACE_THREAD(c,t,0);
+					fl = C_FACE(c,t,2);					
+					tfl = C_FACE_THREAD(c,t,2);			
+					ff = C_FACE(c,t,1);					
+					tff = C_FACE_THREAD(c,t,1);
+					fa = C_FACE(c,t,3);
+					tfa = C_FACE_THREAD(c,t,3);
+				}
+
+				if( NODE_Y(node) == 0 )
+				{
+					fr = C_FACE(c,t,1);
+					tfr = C_FACE_THREAD(c,t,1);
+					fl = C_FACE(c,t,3);					
+					tfl = C_FACE_THREAD(c,t,3);			
+					ff = C_FACE(c,t,2);					
+					tff = C_FACE_THREAD(c,t,2);
+					fa = C_FACE(c,t,0);
+					tfa = C_FACE_THREAD(c,t,0);
+				}
+
+				if( NODE_Y(node)*100000 == 227 )
+				{
+					fr = C_FACE(c,t,3);
+					tfr = C_FACE_THREAD(c,t,3);
+					fl = C_FACE(c,t,1);					
+					tfl = C_FACE_THREAD(c,t,1);			
+					ff = C_FACE(c,t,0);					
+					tff = C_FACE_THREAD(c,t,0);
+					fa = C_FACE(c,t,2);
+					tfa = C_FACE_THREAD(c,t,2);
+				}		
+			}
+			*/
+		}
+		else
+		{
+		
+					fr = C_FACE(c,t,1);
+					tfr = C_FACE_THREAD(c,t,1);
+					fl = C_FACE(c,t,3);					/* --------------------- FOR ---------------------- */
+					tfl = C_FACE_THREAD(c,t,3);			/* ------------------ INTERIOR -------------------- */ 
+					ff = C_FACE(c,t,2);					/* -------------------- CELLS --------------------- */
+					tff = C_FACE_THREAD(c,t,2);
+					fa = C_FACE(c,t,0);
+					tfa = C_FACE_THREAD(c,t,0);
+
+		
+
+					F_CENTROID(XR,fr,tfr);
+					F_CENTROID(XF,ff,tff);
+					F_CENTROID(XL,fl,tfl);
+					F_CENTROID(XA,fa,tfa);
+
+					xr = XR[0] ;
+					yf = XF[1] ;
+					xl = XL[0] ;
+					ya = XA[1] ;
+	
+					ptl = &xl;
+					ptr = &xr;
+					pta = &ya;
+					ptf = &yf;
+
+		//			Message("nx, ny = %f %f \n", nx, ny);
+					ndiag1 = fabs(   dx*(nx) + dy*(ny) );
+					ndiag2 = fabs( - dx*(nx) + dy*(ny) );
+
+				// Pick the maximum of these dot products and use half that distance for max slen
+					mxslen = 0.5*max( ndiag1, ndiag2 );
+		//			Message("dx, dy, mxslen = %g %g %g \n", dx, dy, mxslen);
+		//			Message("xc, yc = %g %g \n", xc[0], xc[1]);
+					toler  = 0.0001;
+					volume = dx*dy;
+	
+   
+
+					void_t = C_VOF(c,t);
+					void_t = VDMNMX(void_t);
+
+		//			Message(" void_t = %f \n " , void_t);
+
+					/* ==================================== use secant method ==================================== */
+
+				  /* =========== first starting value and perturbation length for secant method =========== */
+					/* --------------------------------------------------------------------------------- */
+					epslen		= 0.05*mxslen;
+					lenm1		= epslen;
+		//			(*slen)		= lenm1;
+					C_UDMI(c,t,4) = lenm1;
+		//			Message(" 1st slen = %g \n " , C_UDMI(c,t,4));
+					lgvol( c, t, xl, xr, ya, yf, &lvol );
+		//			Message(" nx, ny, voll first value = %f %f %g \n " , nx, ny, lvol);
+		
+					vdfm1 = lvol/vol;
+					errm1 = vdfm1 - void_t;
+					if (fabs(errm1) < toler) 
+					{
+						lenp1 = lenm1;
+						goto HI;
+					}
+			
+					/* =================== second starting value for secant method ==================== */
+					leng		= lenm1 - epslen;
+			//		(*slen)		= leng;
+					C_UDMI(c,t,4) = leng; 
+		//			Message("2nd slen = %g \n " , C_UDMI(c,t,4));
+					/* =================== main iteration loop - secant method ======================== */
+					itermx = 100;
+					for (niter = 1; niter < itermx; niter++)
+					{
+						lgvol( c, t, xl, xr, ya, yf, &lvol );
+						
+						vdf    = lvol/vol;
+						err    = vdf - void_t;
+						denerr = err - errm1;
+			//			Message("c, slen, lvol = %u %g %g \n", c, C_UDMI(c,t,4), lvol);
+
+			//			 Message("c, niter, nx, ny,  void_t, vdf = %u %d %f %f  %.15f %.15f \n \n " , c, niter, nx, ny, void_t, vdf);
+						 
+		/*				 if( vdf > 1.0 )
+						 {
+							 goto HI;
+						 }						*/
+
+				//		Message("denerr %.15f \n", denerr);
+
+						if(fequal(denerr , 0.0))
+						{
+				//			Message( "bug in iface = niter, c, err, slen, lvol, nx, ny %d %u %g %g %g %f %f \n \n", niter, c, err, C_UDMI(c,t,4), lvol, nx, ny);
+							C_UDMI(c,t,5) = fabs(err);
+                //            Message(" void_t,vdfm1,vdf = %.10f %.10f %.10f \n ", void_t,vdfm1,vdf );
+				//			Message(" err,errm1 = %.10f %.10f \n ", err,errm1 );
+				//			Message(" slen = %.15f  \n ", C_UDMI(c,t,4) );
+				//			Message(" nx,ny = %.10f %.10f \n \n ", nx,ny );
+        		//			return;
+				//			denerr = -0.1 ;
+							return;
+						}
+
+						lenp1  = leng - err*(leng - lenm1)/denerr;
+
+						if (fabs(err) < toler) 
+							{
+				//				Message(" err = %u %g \n \n ", c, err );
+				//				Message("c, slen, lvol, nx, ny = %u %g %g %f %f \n", c, C_UDMI(c,t,4), lvol, nx, ny);
+								C_UDMI(c,t,5) = fabs(err);			// udm memory for accessing err value in LVIRA loop.
+								goto HI;
+							}
+
+	
+
+							  lenm1		= leng;
+							  leng		= lenp1;
+					//		  (*slen)	= leng;
+							  errm1		= err;
+							  C_UDMI(c,t,4) = leng; 
+					}
+		HI: ;
+				//	Message( " HI !!! I am in Get_Len. \n " );
+					lenp1		= min(mxslen, max(-mxslen,lenp1));
+				   
+			//		(*slen)		= lenp1;	
+					C_UDMI(c,t,4) = lenp1; 
+			//		Message("c, slen, void_t, vdf = %u %g %.15f %.15f \n " , c, C_UDMI(c,t,4), void_t, vdf );
+	}
+HI1:;
+
+	return;
+}
