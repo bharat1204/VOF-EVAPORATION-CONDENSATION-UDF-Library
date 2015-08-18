@@ -1,0 +1,20 @@
+
+#include "udf.h"
+#include "sg.h"
+#include "sg_vof.h"
+#include "cxbool.h"
+
+extern cxboolean
+fequal(real a, real b)
+{
+	real epsilon = 0.0000001 ;
+	
+	if(fabs(a - b) < epsilon )
+	{
+		return TRUE;
+	}
+	else
+	{
+		return FALSE;
+	}
+}
