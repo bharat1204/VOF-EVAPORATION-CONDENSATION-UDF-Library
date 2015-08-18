@@ -1,0 +1,61 @@
+#include "udf.h"
+#include "sg.h"
+#include "sg_vof.h"
+#include "cxbool.h"
+
+
+extern void
+lvira(cell_t c, Thread *t, real theta, real dtheta, real *Gfunp)
+{
+/*	 constructs approximation to interface shape. Interface is
+     plane surface in each cell.  Unit normal is constructed
+     from liquid volume fraction profile.						*/
+	Thread *t_liquid = THREAD_SUB_THREAD(t,0);
+	real Gfun, Gfunr, Gfunl, thetar, thetal ;
+    real ssave, nx, ny;
+	real len;
+
+	ssave = C_UDMI(c,t,4); //  slen[c];
+
+    thetar = theta + dtheta;
+    nx	   = cos(thetar);
+    ny     = sin(thetar);
+	
+//	C_UDMI(c,t,7) = 6;
+	get_len(c, t_liquid, nx, ny );
+	G_fun(c, t, thetar, &Gfunr);
+//	if(C_UDMI(c,t,5) < 0.0001 )
+//	{
+	//	Message(" I am in 3 %u \n", c);
+//		(*Gfunp) = 0.0;
+//		C_UDMI(c,t,2) = nx;
+//		C_UDMI(c,t,3) = ny;
+	//	Message(" 1 nx, ny = %u %f %f \n", c, nx, ny );
+//		goto LVIRA_END;
+//	}
+
+	thetal = theta - dtheta;
+    nx	   = cos(thetal);
+    ny     = sin(thetal);
+
+//	C_UDMI(c,t,7) = 7;
+	get_len(c, t_liquid, nx, ny );
+	G_fun(c, t, thetal, &Gfunl);
+//	if(C_UDMI(c,t,5) < 0.0001 )
+//	{
+	//	Message(" I am in 3 %u \n", c);
+//		(*Gfunp) = 0.0;
+//		C_UDMI(c,t,2) = nx;
+//		C_UDMI(c,t,3) = ny;
+	//	Message(" 2 nx, ny = %u %f %f \n", c, nx, ny );
+//		goto LVIRA_END;
+//	}
+
+	(*Gfunp) = ( Gfunr - Gfunl )/(2.0*dtheta);
+
+	C_UDMI(c,t,4) = ssave;
+
+//LVIRA_END:;
+	return;
+
+}
