@@ -1,0 +1,1985 @@
+
+#include "udf.h"
+#include "sg.h"
+#include "sg_vof.h"
+#include "cxbool.h"
+
+
+/* This part calculates mass transfer rate due to evaporation. Refer G. Biswas NOTES and FORTRAN code */ 
+
+// IMPORTANT NOTE: 
+
+//   THIS PART DEPENDS ON GRID GEOMETRY. This code is written for Rectangular grid of size 1.135mm width and 2.27 mm height.
+//   Please change it if you wish to alter geometry.
+DEFINE_MASS_TRANSFER(GTM_Mass_Transfer_MODEL,c,t,from_index,from_species_index, to_index, to_species_index)
+{
+	Domain *d = Get_Domain(1);   
+	Thread *t_liquid = THREAD_SUB_THREAD(t,from_index);
+	Thread *t_vapour = THREAD_SUB_THREAD(t,to_index);
+	cell_t cs; 
+	Thread *ts;
+	
+	/* =============== DECLARATION OF NEIGHBOURING CELL ID'S AND THREAD'S ================= */
+	cell_t cr, cf, cl, ca, crf, cra, clf, cla ;
+	Thread *tf, *ta, *tr, *tl, *trf, *tra, *tlf, *tla ;
+
+	face_t fr,ff,fl,fa,ffr,far,ffl,fal,frp,flp,frm,flm;
+	Thread *tfr, *tff, *tfl, *tfa, *tffr, *tfar, *tffl, *tfal, *tfrp, *tflp, *tfrm, *tflm;
+
+	face_t f;
+	Thread *t_f;
+	Thread *t_fr, *t_ff, *t_fl, *t_fa;
+	Node *node;
+	int a;
+	/* ------------------------------------------------------------------------------------ */
+	cell_t CELL[3][3];
+	Thread *THREAD[3][3];
+	float NV_VEC(S11), NV_VEC(S12), NV_VEC(S13), NV_VEC(S21), NV_VEC(S22), NV_VEC(S23), NV_VEC(S31), NV_VEC(S32), NV_VEC(S33);
+	
+	float SX[3][3], SY[3][3], DS[3][3];
+
+	float source;
+
+	float NV_VEC(n), NV_VEC(s), NV_VEC(sr), NV_VEC(sf), NV_VEC(sl), NV_VEC(sa), NV_VEC(srf), NV_VEC(slf), NV_VEC(sla), NV_VEC(sra), sx , sy ;
+	real  xl , xr , ya , yf; 
+	float XR[ND_ND], XF[ND_ND], XL[ND_ND], XA[ND_ND] , xi , yi , xis , yis;
+	real nx,ny,xint1, xint2 , yint1, yint2;
+	float X[ND_ND], Xr[ND_ND], Xf[ND_ND], Xl[ND_ND], Xa[ND_ND], Xrf[ND_ND], Xlf[ND_ND], Xla[ND_ND], Xra[ND_ND], XC[ND_ND], XCS[ND_ND];
+	real xcf[ND_ND],xca[ND_ND], xcr[ND_ND], xcl[ND_ND] ;
+	real *ptl, *ptr, *pta, *ptf ;
+	real xci[ND_ND];
+	int N;
+	int iface_int1, iface_int2;
+	int iphs;
+	float NV_VEC(q_s), q_n , ds , kl , kg, keff, liq_vof_grad, latent_heat;
+	float XS[ND_ND];
+	int ii,jj;
+	int rr, cc, n_row, n_col ;
+	float dot_prod[3][3] , S[3][3]  ;
+	float big;
+	real ax, ay, bx, by;
+	FILE *fp;
+	char name[50];
+
+	real dx,dy;
+	real len, voll ;
+	real sourcl, sourcv, tempn;
+	
+	real distance;
+	
+	cxboolean check_r ;
+	cxboolean check_f ;
+	cxboolean check_l ;
+	cxboolean check_a ;
+	cxboolean boundary;
+
+	check_r = FALSE;
+	check_f = FALSE;
+	check_l = FALSE;
+	check_a = FALSE;
+	
+	iphs = C_UDMI(c,t,1); //iphase[c];
+	n[0] = C_UDMI(c,t,2); //nx;
+	n[1] = C_UDMI(c,t,3); //ny;	
+
+//	
+
+if (iphs == 2 )
+{
+//	Message(" c, iphs, nx, ny = %u %f %f %f \n", c, C_UDMI(c,t,1), C_UDMI(c,t,2), C_UDMI(c,t,3)  );
+//	Message(" MASS    c,0,1,2,3,4,5 = %u %g %g %g %g %g %g \n", c, C_UDMI(c,t,0), C_UDMI(c,t,1), C_UDMI(c,t,2), C_UDMI(c,t,3), C_UDMI(c,t,4), C_UDMI(c,t,5));	
+//	t_f = C_FACE_THREAD(c,t,0);
+/*
+		boundary = FALSE;
+	c_face_loop(c,t,a)
+	{
+						  
+			t_f = C_FACE_THREAD(c,t,a);
+			if(BOUNDARY_FACE_THREAD_P(t_f))
+			{
+				boundary = TRUE;
+			}
+						  
+		}		*/
+	t_f = C_FACE_THREAD(c,t,0);
+
+  		C_CENTROID(XC,c,t);
+//	Message(" iphs, n[0], n[1] = %d %f %f \n ", iphs, n[0], n[1] );
+
+	if(BOUNDARY_FACE_THREAD_P(t_f))
+	{													
+
+
+					// PLEASE NOTE : THIS WILL CHANGE IN CASE GEOMETRY OF DOMAIN IS DIFFERENT FROM RECTANGULAR ONE(This refers to left boundary.)
+					if( fequal(XC[0], 0.00001135) && (XC[1] > 0.00003405) && (XC[1] < 0.0022473)  )
+					{
+						ff = C_FACE(c,t,3);					
+						tff = C_FACE_THREAD(c,t,3);
+						fa = C_FACE(c,t,1);
+						tfa = C_FACE_THREAD(c,t,1);
+							fr = C_FACE(c,t,2);
+							tfr = C_FACE_THREAD(c,t,2);	
+							fl = C_FACE(c,t,0);
+							tfl = C_FACE_THREAD(c,t,0);	
+							
+//=====================================================================================================================================
+							F_CENTROID(XR,fr,tfr);
+							F_CENTROID(XF,ff,tff);
+							F_CENTROID(XL,fl,tfl);
+							F_CENTROID(XA,fa,tfa);
+
+							xr = XR[0] ;
+							yf = XF[1] ;
+							xl = XL[0] ;
+							ya = XA[1] ;
+
+						// ================ GTM FUNCTION CALL =================== 
+
+							delta(c,t, &dx, &dy); 
+							nx = C_UDMI(c,t,2);
+							ny = C_UDMI(c,t,3);
+	
+							linseg(c, t_liquid, xl, xr, ya, yf, &xint1, &xint2, &yint1, &yint2, &iface_int1, &iface_int2);
+							lgvol( c, t_liquid, xl, xr, ya, yf, &voll );
+
+						// =============== DEFINITION OF N-VECTOR ================ 
+
+				//			n[0]  =  nx; 
+				//			n[1]  =  ny;
+
+						// =============== MODIFIED DEFINITION OF S-VECTOR ================ 
+
+
+						if(xint1 > xint2)
+						{
+							xi = xint2 + fabs((xint1 - xint2)/2.0) ;
+						}
+						else
+						{
+							xi = xint1 + fabs((xint1 - xint2)/2.0) ;
+						}
+
+						if(yint1 > yint2)
+						{
+							yi = yint2 + fabs((yint1 - yint2)/2.0) ;								
+						}
+						else
+						{
+							yi = yint1 + fabs((yint1 - yint2)/2.0) ;								
+						}							
+
+//============================================================================================================================================						
+
+
+					// ----------- FRONT FACE ------------ 
+
+						cf = F_C0(ff,tff);
+						if(cf == c)
+						{
+							cf = F_C1(ff,tff);
+							tf = F_C1_THREAD(ff,tff);
+						}
+						else
+						{
+							tf = F_C0_THREAD(ff,tff);
+						}
+						
+						// ----------- RIGHT FACE ----------- 
+
+							cr = F_C0(fr,tfr);
+							if(cr == c)
+							{
+								cr = F_C1(fr,tfr);
+								tr = F_C1_THREAD(fr,tfr);
+							}
+							else
+							{
+								tr = F_C0_THREAD(fr,tfr);
+							}   
+
+					// ------------ AFTER FACE ------------ 
+
+						ca = F_C0(fa,tfa);
+						if(ca == c)
+						{
+							ca = F_C1(fa,tfa);
+							ta = F_C1_THREAD(fa,tfa);
+						}
+						else
+						{
+							ta = F_C0_THREAD(fa,tfa);
+						}
+
+						C_CENTROID(xcf,cf,tf);
+						C_CENTROID(xca,ca,ta);
+
+							if ( fequal( xcf[1], 0.00225865 ) )
+							{
+								return 0.0;							
+							}
+							else if ( fequal(xca[1],0.00001135) )
+							{
+								return 0.0;
+							}
+							else
+							{
+									frm = C_FACE(ca,ta,2);
+									tfrm = C_FACE_THREAD(ca,ta,2);
+
+									frp = C_FACE(cf,tf,2);
+									tfrp = C_FACE_THREAD(cf,tf,2);
+			
+								// ======================== (crf,trf) ============================= 
+
+									crf = F_C0(frp,tfrp);
+									if(crf == cr)
+									{
+										crf = F_C1(frp,tfrp);
+										trf = F_C1_THREAD(frp,tfrp);
+									}
+									else
+									{
+										trf = F_C0_THREAD(frp,tfrp);
+									}
+
+
+								// ======================== (cra,tra) ============================= 
+
+									cra = F_C0(frm,tfrm);
+									if(cra == cr)
+									{
+										cra = F_C1(frm,tfrm);
+										tra = F_C1_THREAD(frm,tfrm);
+									}
+									else
+									{
+										tra = F_C0_THREAD(frm,tfrm);
+									}
+							}
+//			Message(" cf = %u \t crf = %u \n ", cf, crf);		
+//			Message(" c  = %u \t cr  = %u \n ", c, cr   );	
+//			Message(" ca = %u \t cra = %u \n ", ca, cra);
+
+					}
+
+					// PLEASE NOTE : THIS WILL CHANGE IN CASE GEOMETRY OF DOMAIN IS DIFFERENT FROM RECTANGULAR ONE(This refers to right boundary.)
+				    else if( fequal(XC[0], 0.00112365) && (XC[1] > 0.00003405) && (XC[1] < 0.0022473)  )
+					{
+						ff = C_FACE(c,t,1);					
+						tff = C_FACE_THREAD(c,t,1);
+						fa = C_FACE(c,t,3);
+						tfa = C_FACE_THREAD(c,t,3);
+						fl = C_FACE(c,t,2);
+						tfl = C_FACE_THREAD(c,t,2);	
+						fr = C_FACE(c,t,0);
+						tfr = C_FACE_THREAD(c,t,0);	
+					
+			//			Message(" HI I am Right \n");
+
+//=========================================================================================================================================
+							F_CENTROID(XR,fr,tfr);
+							F_CENTROID(XF,ff,tff);
+							F_CENTROID(XL,fl,tfl);
+							F_CENTROID(XA,fa,tfa);
+
+							xr = XR[0] ;
+							yf = XF[1] ;
+							xl = XL[0] ;
+							ya = XA[1] ;
+
+						// ================ GTM FUNCTION CALL =================== 
+
+							delta(c,t, &dx, &dy); 
+							nx = C_UDMI(c,t,2);
+							ny = C_UDMI(c,t,3);
+	
+							linseg(c, t_liquid, xl, xr, ya, yf, &xint1, &xint2, &yint1, &yint2, &iface_int1, &iface_int2);
+							lgvol( c, t_liquid, xl, xr, ya, yf, &voll );
+
+						// =============== DEFINITION OF N-VECTOR ================ 
+
+				//			n[0]  =  nx; 
+				//			n[1]  =  ny;
+
+						// =============== MODIFIED DEFINITION OF S-VECTOR ================ 
+
+
+						if(xint1 > xint2)
+						{
+							xi = xint2 + fabs((xint1 - xint2)/2.0) ;
+						}
+						else
+						{
+							xi = xint1 + fabs((xint1 - xint2)/2.0) ;
+						}
+
+						if(yint1 > yint2)
+						{
+							yi = yint2 + fabs((yint1 - yint2)/2.0) ;								
+						}
+						else
+						{
+							yi = yint1 + fabs((yint1 - yint2)/2.0) ;								
+						}			
+
+//============================================================================================================================================
+
+							// ----------- FRONT FACE ------------ 
+
+								cf = F_C0(ff,tff);
+								if(cf == c)
+								{
+									cf = F_C1(ff,tff);
+									tf = F_C1_THREAD(ff,tff);
+								}
+								else
+								{
+									tf = F_C0_THREAD(ff,tff);
+								}
+
+					// ----------- LEFT FACE ------------ 
+
+							cl = F_C0(fl,tfl);
+							if(cl == c)
+							{
+								cl = F_C1(fl,tfl);
+								tl = F_C1_THREAD(fl,tfl);
+							}
+							else
+							{
+								tl = F_C0_THREAD(fl,tfl);
+							}
+
+
+							// ------------ AFTER FACE ------------ 
+
+								ca = F_C0(fa,tfa);
+								if(ca == c)
+								{
+									ca = F_C1(fa,tfa);
+									ta = F_C1_THREAD(fa,tfa);
+								}
+								else
+								{
+									ta = F_C0_THREAD(fa,tfa);
+								}
+
+						C_CENTROID(xcf,cf,tf);
+						C_CENTROID(xca,ca,ta);
+
+							if ( fequal( xcf[1], 0.00225865 ) )
+							{
+								return 0.0;			
+							}
+							else if ( fequal(xca[1],0.00001135) )
+							{
+								return 0.0;
+							}
+							else
+							{
+									flp = C_FACE(cf,tf,2);
+									tflp = C_FACE_THREAD(cf,tf,2);
+
+									flm = C_FACE(ca,ta,2);
+									tflm = C_FACE_THREAD(ca,ta,2);
+
+
+								// ======================== (crf,trf) ============================= 
+
+									clf = F_C0(flp,tflp);
+									if(clf == cl)
+									{
+										clf = F_C1(flp,tflp);
+										tlf = F_C1_THREAD(flp,tflp);
+									}
+									else
+									{
+										tlf = F_C0_THREAD(flp,tflp);
+									}
+
+
+								// ======================== (cra,tra) ============================= 
+
+									cla = F_C0(flm,tflm);
+									if(cla == cl)
+									{
+										cla = F_C1(flm,tflm);
+										tla = F_C1_THREAD(flm,tflm);
+									}
+									else
+									{
+										tla = F_C0_THREAD(flm,tflm);
+									}
+							}
+//			Message(" clf = %u \t cf = %u \n ", clf, cf);		
+//			Message(" cl = %u  \t c  = %u \n ", cl, c   );	
+//			Message(" cla = %u \t ca = %u \n ", cla, ca);
+
+
+
+
+					}
+
+					// PLEASE NOTE : THIS WILL CHANGE IN CASE GEOMETRY OF DOMAIN IS DIFFERENT FROM RECTANGULAR ONE(This refers to bottom boundary.)
+					else if( fequal(XC[1], 0.00001135) && (XC[0] > 0.0000227) && (XC[0] < 0.00112365) )
+					{
+						ff = C_FACE(c,t,2);					
+						tff = C_FACE_THREAD(c,t,2);
+						fr = C_FACE(c,t,1);
+						tfr = C_FACE_THREAD(c,t,1);			
+						fl = C_FACE(c,t,3);
+						tfl = C_FACE_THREAD(c,t,3);
+						fa = C_FACE(c,t,0);
+						tfa = C_FACE_THREAD(c,t,0);
+
+
+//=========================================================================================================================================
+						F_CENTROID(XR,fr,tfr);
+						F_CENTROID(XF,ff,tff);
+						F_CENTROID(XL,fl,tfl);
+						F_CENTROID(XA,fa,tfa);
+
+						xr = XR[0] ;
+						yf = XF[1] ;
+						xl = XL[0] ;
+						ya = XA[1] ;
+
+					// ================ GTM FUNCTION CALL =================== 
+
+						delta(c,t, &dx, &dy); 
+						nx = C_UDMI(c,t,2);
+						ny = C_UDMI(c,t,3);
+	
+						linseg(c, t_liquid, xl, xr, ya, yf, &xint1, &xint2, &yint1, &yint2, &iface_int1, &iface_int2);
+						lgvol( c, t_liquid, xl, xr, ya, yf, &voll );
+
+					// =============== DEFINITION OF N-VECTOR ================ 
+
+			//				n[0]  =  nx; 
+			//				n[1]  =  ny;
+
+					// =============== MODIFIED DEFINITION OF S-VECTOR ================ 
+
+
+						if(xint1 > xint2)
+						{
+							xi = xint2 + fabs((xint1 - xint2)/2.0) ;
+						}
+						else
+						{
+							xi = xint1 + fabs((xint1 - xint2)/2.0) ;
+						}
+
+						if(yint1 > yint2)
+						{
+							yi = yint2 + fabs((yint1 - yint2)/2.0) ;								
+						}
+						else
+						{
+							yi = yint1 + fabs((yint1 - yint2)/2.0) ;								
+						}			
+
+//============================================================================================================================================
+
+
+						// ----------- RIGHT FACE ----------- 
+
+							cr = F_C0(fr,tfr);
+							if(cr == c)
+							{
+								cr = F_C1(fr,tfr);
+								tr = F_C1_THREAD(fr,tfr);
+							}
+							else
+							{
+								tr = F_C0_THREAD(fr,tfr);
+							}   
+
+						// ----------- LEFT FACE ------------ =
+
+							cl = F_C0(fl,tfl);
+							if(cl == c)
+							{
+								cl = F_C1(fl,tfl);
+								tl = F_C1_THREAD(fl,tfl);
+							}
+							else
+							{
+								tl = F_C0_THREAD(fl,tfl);
+							}
+
+						// ----------- FRONT FACE ------------ =
+
+							cf = F_C0(ff,tff);
+							if(cf == c)
+							{
+								cf = F_C1(ff,tff);
+								tf = F_C1_THREAD(ff,tff);
+							}
+							else
+							{
+								tf = F_C0_THREAD(ff,tff);
+							}
+
+						c_face_loop(cr,tr,N)
+						{
+							t_fr = C_FACE_THREAD(cr,tr,N);
+							if( BOUNDARY_FACE_THREAD_P(t_fr) )
+							{
+								check_r = TRUE;
+							}
+						}
+
+					C_CENTROID(xcr, cr, tr);
+					C_CENTROID(xcl, cl, tl);
+
+							if (fequal(xcr[0], 0.00112365) )
+							{
+								return 0.0 ;
+
+							}
+							else if(fequal(xcl[0], 0.000011365) )
+							{
+								return 0.0 ;
+							}
+							else
+							{
+
+									ffr = C_FACE(cr,tr,2);
+									tffr = C_FACE_THREAD(cr,tr,2);
+
+									ffl = C_FACE(cl,tl,2);
+									tffl = C_FACE_THREAD(cl,tl,2);
+
+								// ======================== (crf,trf) ============================= 
+
+									crf = F_C0(ffr,tffr);
+									if(crf == cr)
+									{
+										crf = F_C1(ffr,tffr);
+										trf = F_C1_THREAD(ffr,tffr);
+									}
+									else
+									{
+										trf = F_C0_THREAD(ffr,tffr);
+									}
+						//			Message(" crf = %u \n ", crf);
+
+								// ======================== (clf,tlf) ============================= 
+
+									clf = F_C0(ffl,tffl);
+									if(clf == cl)
+									{
+										clf = F_C1(ffl,tffl);
+										tlf = F_C1_THREAD(ffl,tffl);
+									}
+									else
+									{
+										tlf = F_C0_THREAD(ffl,tffl);
+									}
+						//			Message(" clf = %u \n ", clf);
+							
+							}
+
+//								Message(" clf = %u \t cf = %u \t crf = %u \n ", clf, cf, crf);		
+//								Message(" cl = %u  \t c  = %u \t cr  = %u \n ", cl, c, cr   );									
+
+					}
+					
+					// PLEASE NOTE : THIS WILL CHANGE IN CASE GEOMETRY OF DOMAIN IS DIFFERENT FROM RECTANGULAR ONE(This refers to top boundary.)
+					else if( fequal(XC[1], 0.00225865) && (XC[0] > 0.0000227) && (XC[0] < 0.00112365) )
+					{
+						fa = C_FACE(c,t,2);
+						tfa = C_FACE_THREAD(c,t,2);
+						fr = C_FACE(c,t,3);
+						tfr = C_FACE_THREAD(c,t,3);			
+						fl = C_FACE(c,t,1);
+						tfl = C_FACE_THREAD(c,t,1);
+						ff = C_FACE(c,t,0);
+						tff = C_FACE_THREAD(c,t,0);
+
+	//					Message(" HI I am TOP \n");
+					
+//=========================================================================================================================================
+						F_CENTROID(XR,fr,tfr);
+						F_CENTROID(XF,ff,tff);
+						F_CENTROID(XL,fl,tfl);
+						F_CENTROID(XA,fa,tfa);
+
+						xr = XR[0] ;
+						yf = XF[1] ;
+						xl = XL[0] ;
+						ya = XA[1] ;
+
+					// ================ GTM FUNCTION CALL =================== 
+
+						delta(c,t, &dx, &dy); 
+						nx = C_UDMI(c,t,2);
+						ny = C_UDMI(c,t,3);
+	
+						linseg(c, t_liquid, xl, xr, ya, yf, &xint1, &xint2, &yint1, &yint2, &iface_int1, &iface_int2);
+						lgvol( c, t_liquid, xl, xr, ya, yf, &voll );
+
+					// =============== DEFINITION OF N-VECTOR ================ 
+
+			//				n[0]  =  nx; 
+			//				n[1]  =  ny;
+
+					// =============== MODIFIED DEFINITION OF S-VECTOR ================ 
+
+
+						if(xint1 > xint2)
+						{
+							xi = xint2 + fabs((xint1 - xint2)/2.0) ;
+						}
+						else
+						{
+							xi = xint1 + fabs((xint1 - xint2)/2.0) ;
+						}
+
+						if(yint1 > yint2)
+						{
+							yi = yint2 + fabs((yint1 - yint2)/2.0) ;								
+						}
+						else
+						{
+							yi = yint1 + fabs((yint1 - yint2)/2.0) ;								
+						}			
+
+//============================================================================================================================================
+
+						// ----------- RIGHT FACE ----------- 
+
+							cr = F_C0(fr,tfr);
+							if(cr == c)
+							{
+								cr = F_C1(fr,tfr);
+								tr = F_C1_THREAD(fr,tfr);
+							}
+							else
+							{
+								tr = F_C0_THREAD(fr,tfr);
+							}   
+
+						// ----------- LEFT FACE ------------ 
+
+							cl = F_C0(fl,tfl);
+							if(cl == c)
+							{
+								cl = F_C1(fl,tfl);
+								tl = F_C1_THREAD(fl,tfl);
+							}
+							else
+							{
+								tl = F_C0_THREAD(fl,tfl);
+							}
+
+						// ----------- AFTER FACE ------------ 
+
+							ca = F_C0(fa,tfa);
+							if(ca == c)
+							{
+								ca = F_C1(fa,tfa);
+								ta = F_C1_THREAD(fa,tfa);
+							}
+							else
+							{
+								ta = F_C0_THREAD(fa,tfa);
+							}
+
+
+
+							C_CENTROID(xcr,cr,tr);
+							C_CENTROID(xcl,cl,tl);
+
+							if (fequal(xcr[0] , 0.00112365))
+							{
+								return 0.0 ;
+							}
+							else if(fequal(xcl[0], 0.00001135))
+							{
+								return 0.0 ;
+							}
+							else
+							{
+									far = C_FACE(cr,tr,2);
+									tfar = C_FACE_THREAD(cr,tr,2);
+
+									fal = C_FACE(cl,tl,2);
+									tfal = C_FACE_THREAD(cl,tl,2);
+
+								// ======================== (cra,tra) ============================= 
+
+									cra = F_C0(far,tfar);
+									if(cra == cr)
+									{
+										cra = F_C1(far,tfar);
+										tra = F_C1_THREAD(far,tfar);
+									}
+									else
+									{
+										tra = F_C0_THREAD(far,tfar);
+									}
+						//			Message(" crf = %u \n ", crf);
+
+								// ======================== (cla,tla) ============================= 
+
+									cla = F_C0(fal,tfal);
+									if(cla == cl)
+									{
+										cla = F_C1(fal,tfal);
+										tla = F_C1_THREAD(fal,tfal);
+									}
+									else
+									{
+										tla = F_C0_THREAD(fal,tfal);
+									}
+						//			Message(" clf = %u \n ", clf);
+
+							}
+//									Message(" cl = %u  \t c  = %u \t cr  = %u \n ", cl, c, cr   );
+//									Message(" cla = %u \t ca = %u \t cra = %u \n ", cla, ca, cra);
+					}				
+					else
+					{
+						return 0.0;
+
+						}
+			
+	}
+	else
+	{
+	
+		fr = C_FACE(c,t,1);
+		tfr = C_FACE_THREAD(c,t,1);
+		fl = C_FACE(c,t,3);					
+		tfl = C_FACE_THREAD(c,t,3);			
+		ff = C_FACE(c,t,2);					
+		tff = C_FACE_THREAD(c,t,2);
+		fa = C_FACE(c,t,0);
+		tfa = C_FACE_THREAD(c,t,0);
+	
+
+
+
+	// ----------- RIGHT FACE ----------- =
+
+		cr = F_C0(fr,tfr);
+		if(cr == c)
+		{
+			cr = F_C1(fr,tfr);
+			tr = F_C1_THREAD(fr,tfr);
+		}
+		else
+		{
+			tr = F_C0_THREAD(fr,tfr);
+		}   
+
+	// ----------- LEFT FACE ------------ =
+
+		cl = F_C0(fl,tfl);
+		if(cl == c)
+		{
+			cl = F_C1(fl,tfl);
+			tl = F_C1_THREAD(fl,tfl);
+		}
+		else
+		{
+			tl = F_C0_THREAD(fl,tfl);
+		}
+
+	// ----------- FRONT FACE ------------ =
+
+		cf = F_C0(ff,tff);
+		if(cf == c)
+		{
+			cf = F_C1(ff,tff);
+			tf = F_C1_THREAD(ff,tff);
+		}
+		else
+		{
+			tf = F_C0_THREAD(ff,tff);
+		}
+
+	// ------------ AFTER FACE ------------ =
+
+		ca = F_C0(fa,tfa);
+		if(ca == c)
+		{
+			ca = F_C1(fa,tfa);
+			ta = F_C1_THREAD(fa,tfa);
+		}
+		else
+		{
+			ta = F_C0_THREAD(fa,tfa);
+		}
+//	Message("      cf    = \t \t %u \t \t  \n ", cf );
+//	Message(" cl , c, cr = %u \t %u \t %u \n ", cl, c, cr );
+//	Message("      ca    = \t \t %u \t \t  \n ", ca );
+
+//=========================================================================================================================================
+						F_CENTROID(XR,fr,tfr);
+						F_CENTROID(XF,ff,tff);
+						F_CENTROID(XL,fl,tfl);
+						F_CENTROID(XA,fa,tfa);
+
+						xr = XR[0] ;
+						yf = XF[1] ;
+						xl = XL[0] ;
+						ya = XA[1] ;
+
+					// ================ GTM FUNCTION CALL =================== 
+
+						delta(c,t, &dx, &dy); 
+						nx = C_UDMI(c,t,2);
+						ny = C_UDMI(c,t,3);
+	
+						linseg(c, t_liquid, xl, xr, ya, yf, &xint1, &xint2, &yint1, &yint2, &iface_int1, &iface_int2);
+						lgvol( c, t_liquid, xl, xr, ya, yf, &voll );
+
+					// =============== DEFINITION OF N-VECTOR ================ 
+
+		//					n[0]  =  nx; 
+		//					n[1]  =  ny;
+
+					// =============== MODIFIED DEFINITION OF S-VECTOR ================ 
+
+
+						if(xint1 > xint2)
+						{
+							xi = xint2 + fabs((xint1 - xint2)/2.0) ;
+						}
+						else
+						{
+							xi = xint1 + fabs((xint1 - xint2)/2.0) ;
+						}
+
+						if(yint1 > yint2)
+						{
+							yi = yint2 + fabs((yint1 - yint2)/2.0) ;								
+						}
+						else
+						{
+							yi = yint1 + fabs((yint1 - yint2)/2.0) ;								
+						}			
+
+//============================================================================================================================================
+
+
+		c_face_loop(cr,tr,N)
+		{
+			t_fr = C_FACE_THREAD(cr,tr,N);
+			if( BOUNDARY_FACE_THREAD_P(t_fr) )
+			{
+				check_r = TRUE;
+			}
+		}
+
+		c_face_loop(cf,tf,N)
+		{
+			t_ff = C_FACE_THREAD(cf,tf,N);
+			if( BOUNDARY_FACE_THREAD_P(t_ff) )
+			{
+				check_f = TRUE;
+			}
+		}
+
+		c_face_loop(cl,tl,N)
+		{
+			t_fl = C_FACE_THREAD(cl,tl,N);
+			if( BOUNDARY_FACE_THREAD_P(t_fl) )
+			{
+				check_l = TRUE;
+			}
+		}
+
+		c_face_loop(ca,ta,N)
+		{
+			t_fa = C_FACE_THREAD(ca,ta,N);
+			if( BOUNDARY_FACE_THREAD_P(t_fa) )
+			{
+				check_a = TRUE;
+			}
+		}				
+
+		if( check_r )
+		{
+//			Message(" BOUNDARY CELL ENCOUNTERED \n ");
+			
+
+				ffr = C_FACE(cr,tr,1);
+				tffr = C_FACE_THREAD(cr,tr,1);
+
+				far = C_FACE(cr,tr,3);
+				tfar = C_FACE_THREAD(cr,tr,3);
+
+				ffl = C_FACE(cl,tl,2);
+				tffl = C_FACE_THREAD(cl,tl,2);
+
+				fal = C_FACE(cl,tl,0);
+				tfal = C_FACE_THREAD(cl,tl,0);
+
+			// ======================== (crf,trf) ============================= =
+
+				crf = F_C0(ffr,tffr);
+				if(crf == cr)
+				{
+					crf = F_C1(ffr,tffr);
+					trf = F_C1_THREAD(ffr,tffr);
+				}
+				else
+				{
+					trf = F_C0_THREAD(ffr,tffr);
+				}
+	//			Message(" crf = %u \n ", crf);
+			// ======================== (cra,tra) ============================= =
+
+				cra = F_C0(far,tfar);
+				if(cra == cr)
+				{
+					cra = F_C1(far,tfar);
+					tra = F_C1_THREAD(far,tfar);
+				}
+				else
+				{
+					tra = F_C0_THREAD(far,tfar);
+				}
+	//			Message(" cra = %u \n ", cra);	
+			// ======================== (clf,tlf) ============================= =
+
+				clf = F_C0(ffl,tffl);
+				if(clf == cl)
+				{
+					clf = F_C1(ffl,tffl);
+					tlf = F_C1_THREAD(ffl,tffl);
+				}
+				else
+				{
+					tlf = F_C0_THREAD(ffl,tffl);
+				}
+	//			Message(" clf = %u \n ", clf);
+			// ======================== (cla,tla) ============================= =
+
+				cla = F_C0(fal,tfal);
+				if(cla == cl)
+				{
+					cla = F_C1(fal,tfal);
+					tla = F_C1_THREAD(fal,tfal);
+				}
+				else
+				{
+					tla = F_C0_THREAD(fal,tfal);
+				}
+	//			Message(" cla = %u \n ", cla);
+		
+		}
+		else if ( check_f )
+		{
+			
+				frp = C_FACE(cf,tf,3);
+				tfrp = C_FACE_THREAD(cf,tf,3);
+
+				flp = C_FACE(cf,tf,1);
+				tflp = C_FACE_THREAD(cf,tf,1);
+
+				frm = C_FACE(ca,ta,1);
+				tfrm = C_FACE_THREAD(ca,ta,1);
+
+				flm = C_FACE(ca,ta,3);
+				tflm = C_FACE_THREAD(ca,ta,3);
+
+			// ======================== (crf,trf) ============================= =
+
+				crf = F_C0(frp,tfrp);
+				if(crf == cr)
+				{
+					crf = F_C1(frp,tfrp);
+					trf = F_C1_THREAD(frp,tfrp);
+				}
+				else
+				{
+					trf = F_C0_THREAD(frp,tfrp);
+				}
+
+			// ======================== (clf,tlf) ============================= =
+
+				clf = F_C0(flp,tflp);
+				if(clf == cl)
+				{
+					clf = F_C1(flp,tflp);
+					tlf = F_C1_THREAD(flp,tflp);
+				}
+				else
+				{
+					tlf = F_C0_THREAD(flp,tflp);
+				}
+
+			// ======================== (cra,tra) ============================= =
+
+				cra = F_C0(frm,tfrm);
+				if(cra == cr)
+				{
+					cra = F_C1(frm,tfrm);
+					tra = F_C1_THREAD(frm,tfrm);
+				}
+				else
+				{
+					tra = F_C0_THREAD(frm,tfrm);
+				}
+
+			// ======================== (cla,tla) ============================= =
+
+				cla = F_C0(flm,tflm);
+				if(cla == cl)
+				{
+					cla = F_C1(flm,tflm);
+					tla = F_C1_THREAD(flm,tflm);
+				}
+				else
+				{
+					tla = F_C0_THREAD(flm,tflm);
+				}
+			
+		}
+		else if ( check_l ) 
+		{
+			
+				ffl = C_FACE(cl,tl,3);
+				tffl = C_FACE_THREAD(cl,tl,3);
+
+				fal = C_FACE(cl,tl,1);
+				tfal = C_FACE_THREAD(cl,tl,1);
+
+				ffr = C_FACE(cr,tr,2);
+				tffr = C_FACE_THREAD(cr,tr,2);
+
+				far = C_FACE(cr,tr,0);
+				tfar = C_FACE_THREAD(cr,tr,0);
+
+			// ======================== (crf,trf) ============================= =
+
+				crf = F_C0(ffr,tffr);
+				if(crf == cr)
+				{
+					crf = F_C1(ffr,tffr);
+					trf = F_C1_THREAD(ffr,tffr);
+				}
+				else
+				{
+					trf = F_C0_THREAD(ffr,tffr);
+				}
+	//			Message(" crf = %u \n ", crf);
+			// ======================== (cra,tra) ============================= =
+
+				cra = F_C0(far,tfar);
+				if(cra == cr)
+				{
+					cra = F_C1(far,tfar);
+					tra = F_C1_THREAD(far,tfar);
+				}
+				else
+				{
+					tra = F_C0_THREAD(far,tfar);
+				}
+	//			Message(" cra = %u \n ", cra);	
+			// ======================== (clf,tlf) ============================= =
+
+				clf = F_C0(ffl,tffl);
+				if(clf == cl)
+				{
+					clf = F_C1(ffl,tffl);
+					tlf = F_C1_THREAD(ffl,tffl);
+				}
+				else
+				{
+					tlf = F_C0_THREAD(ffl,tffl);
+				}
+	//			Message(" clf = %u \n ", clf);
+			// ======================== (cla,tla) ============================= =
+
+				cla = F_C0(fal,tfal);
+				if(cla == cl)
+				{
+					cla = F_C1(fal,tfal);
+					tla = F_C1_THREAD(fal,tfal);
+				}
+				else
+				{
+					tla = F_C0_THREAD(fal,tfal);
+				}
+	//			Message(" cla = %u \n ", cla);
+		
+			
+		}
+		else if ( check_a )
+		{
+			
+				frm = C_FACE(ca,ta,1);
+				tfrm = C_FACE_THREAD(ca,ta,1);
+
+				flm = C_FACE(ca,ta,3);
+				tflm = C_FACE_THREAD(ca,ta,3);
+
+				frp = C_FACE(cf,tf,1);
+				tfrp = C_FACE_THREAD(cf,tf,1);
+
+				flp = C_FACE(cf,tf,3);
+				tflp = C_FACE_THREAD(cf,tf,3);
+			
+			// ======================== (crf,trf) ============================= =
+
+				crf = F_C0(frp,tfrp);
+				if(crf == cr)
+				{
+					crf = F_C1(frp,tfrp);
+					trf = F_C1_THREAD(frp,tfrp);
+				}
+				else
+				{
+					trf = F_C0_THREAD(frp,tfrp);
+				}
+
+			// ======================== (clf,tlf) ============================= =
+				clf = F_C0(flp,tflp);
+				if(clf == cl)
+				{
+					clf = F_C1(flp,tflp);
+					tlf = F_C1_THREAD(flp,tflp);
+				}
+				else
+				{
+					tlf = F_C0_THREAD(flp,tflp);
+				}
+
+			// ======================== (cra,tra) ============================= =
+
+				cra = F_C0(frm,tfrm);
+				if(cra == cr)
+				{
+					cra = F_C1(frm,tfrm);
+					tra = F_C1_THREAD(frm,tfrm);
+				}
+				else
+				{
+					tra = F_C0_THREAD(frm,tfrm);
+				}
+
+			// ======================== (cla,tla) ============================= =
+
+				cla = F_C0(flm,tflm);
+				if(cla == cl)
+				{
+					cla = F_C1(flm,tflm);
+					tla = F_C1_THREAD(flm,tflm);
+				}
+				else
+				{
+					tla = F_C0_THREAD(flm,tflm);
+				}
+		}
+		else
+		{
+		// ============== DEFINITION OF SECONDARY NEIGHBOURS ============== =
+
+ 
+			ffr = C_FACE(cr,tr,2);
+			tffr = C_FACE_THREAD(cr,tr,2);
+
+			far = C_FACE(cr,tr,0);
+			tfar = C_FACE_THREAD(cr,tr,0);
+
+			ffl = C_FACE(cl,tl,2);
+			tffl = C_FACE_THREAD(cl,tl,2);
+
+			fal = C_FACE(cl,tl,0);
+			tfal = C_FACE_THREAD(cl,tl,0);
+
+//		Message("  far, tfar, ffl, tffl, fal, tfal =  %u %u %u %u %u %u  \n ", far, tfar, ffl, tffl, fal, tfal); 
+
+
+
+		// ======================== (crf,trf) ============================= =
+
+			crf = F_C0(ffr,tffr);
+			if(crf == cr)
+			{
+				crf = F_C1(ffr,tffr);
+				trf = F_C1_THREAD(ffr,tffr);
+			}
+			else
+			{
+				trf = F_C0_THREAD(ffr,tffr);
+			}
+//			Message(" crf = %u \n ", crf);
+		// ======================== (cra,tra) ============================= =
+
+		cra = F_C0(far,tfar);
+			if(cra == cr)
+			{
+				cra = F_C1(far,tfar);
+				tra = F_C1_THREAD(far,tfar);
+			}
+			else
+			{
+				tra = F_C0_THREAD(far,tfar);
+			}
+//			Message(" cra = %u \n ", cra);	
+		// ======================== (clf,tlf) ============================= =
+
+			clf = F_C0(ffl,tffl);
+			if(clf == cl)
+			{
+				clf = F_C1(ffl,tffl);
+				tlf = F_C1_THREAD(ffl,tffl);
+			}
+			else
+			{
+				tlf = F_C0_THREAD(ffl,tffl);
+			}
+//			Message(" clf = %u \n ", clf);
+		// ======================== (cla,tla) ============================= =
+
+			cla = F_C0(fal,tfal);
+			if(cla == cl)
+			{
+				cla = F_C1(fal,tfal);
+				tla = F_C1_THREAD(fal,tfal);
+			}
+			else
+			{
+				tla = F_C0_THREAD(fal,tfal);
+			}
+//			Message(" cla = %u \n ", cla);
+			
+			}
+
+//	Message(" clf = %u \t cf = %u \t crf = %u \n ", clf, cf, crf);		
+//	Message(" cl = %u  \t c  = %u \t cr  = %u \n ", cl, c, cr   );	
+//	Message(" cla = %u \t ca = %u \t cra = %u \n ", cla, ca, cra);
+//	Message(" tlf = %u \t tf = %u \t trf = %u \n ", tlf, tf, trf);		
+//	Message(" tl = %u  \t t  = %u \t tr  = %u \n ", tl, t, tr   );	
+//	Message(" tla = %u \t ta = %u \t tra = %u \n ", tla, ta, tra);
+					
+
+		}
+			
+
+		
+
+
+	
+			//	Message(" X[ND_ND] , Xr[ND_ND] = \n %g %g \n %g %g \n ", xi, X[1], Xr[0], Xr[1]);
+
+		
+
+										t_f = C_FACE_THREAD(c,t,0);
+
+  										C_CENTROID(XC,c,t);
+	
+
+										if(BOUNDARY_FACE_THREAD_P(t_f))
+										{
+
+
+											    if( fequal(XC[0], 0.00001135) && (XC[1] > 0.00003405) && (XC[1] < 0.0022473)  )			// PLEASE NOTE : THIS WILL CHANGE IN CASE GEOMETRY OF DOMAIN IS DIFFERENT FROM RECTANGULAR ONE(This refers to left boundary.)
+												{
+													C_CENTROID(X,c,t);
+													C_CENTROID(Xr,cr,tr);
+													C_CENTROID(Xf,cf,tf);
+													C_CENTROID(Xa,ca,ta);
+													C_CENTROID(Xrf,crf,trf);		
+													C_CENTROID(Xra,cra,tra);
+
+													NV_D(S11 , = , (Xf[0] - xi) , (Xf[1] - yi) , 0.0 );
+													NV_D(S12 , = , (Xrf[0]  - xi) , (Xrf[1]  - yi) , 0.0 );
+													NV_D(S21 , = , (X[0]  - xi) , (X[1]  - yi) , 0.0 );
+													NV_D(S22 , = , (Xr[0]   - xi) , (Xr[1]   - yi) , 0.0 );
+													NV_D(S31 , = , (Xa[0] - xi) , (Xa[1] - yi) , 0.0 );
+													NV_D(S32 , = , (Xra[0]  - xi) , (Xra[1]  - yi) , 0.0 );
+		
+													SX[1][1] = (Xf[0] - xi);
+													SX[1][2] = (Xrf[0]  - xi);
+													SX[2][1] = (X[0]  - xi);
+													SX[2][2] = (Xr[0]   - xi);
+													SX[3][1] = (Xa[0] - xi);
+													SX[3][2] = (Xra[0]  - xi);
+	
+													SY[1][1] = (Xf[1] - yi);
+													SY[1][2] = (Xrf[1]  - yi);
+													SY[2][1] = (X[1]  - yi);
+													SY[2][2] = (Xr[1]   - yi);
+													SY[3][1] = (Xa[1] - yi);
+													SY[3][2] = (Xra[1]  - yi);
+
+													DS[1][1] = sqrt(SX[1][1]*SX[1][1] + SY[1][1]*SY[1][1]) ;
+													DS[1][2] = sqrt(SX[1][2]*SX[1][2] + SY[1][2]*SY[1][2]) ;
+												//	DS[1][3] = sqrt(SX[1][3]*SX[1][3] + SY[1][3]*SY[1][3]) ;
+													DS[2][1] = sqrt(SX[2][1]*SX[2][1] + SY[2][1]*SY[2][1]) ;
+													DS[2][2] = sqrt(SX[2][2]*SX[2][2] + SY[2][2]*SY[2][2]) ;
+												//	DS[2][3] = sqrt(SX[2][3]*SX[2][3] + SY[2][3]*SY[2][3]) ;
+													DS[3][1] = sqrt(SX[3][1]*SX[3][1] + SY[3][1]*SY[3][1]) ;
+													DS[3][2] = sqrt(SX[3][2]*SX[3][2] + SY[3][2]*SY[3][2]) ;
+												//	DS[3][3] = sqrt(SX[3][3]*SX[3][3] + SY[3][3]*SY[3][3]) ;
+
+													SX[1][1] /= DS[1][1];
+													SX[1][2] /= DS[1][2];
+													SX[2][1] /= DS[2][1];
+													SX[2][2] /= DS[2][2];
+													SX[3][1] /= DS[3][1];
+													SX[3][2] /= DS[3][2];
+	
+													SY[1][1] /= DS[1][1];
+													SY[1][2] /= DS[1][2];
+													SY[2][1] /= DS[2][1];
+													SY[2][2] /= DS[2][2];
+													SY[3][1] /= DS[3][1];
+													SY[3][2] /= DS[3][2];
+
+													dot_prod[1][1] = -( SX[1][1]*n[0] + SY[1][1]*n[1] ) ;//NV_DOT( S[1][1] , n );
+													dot_prod[1][2] = -( SX[1][2]*n[0] + SY[1][2]*n[1] ) ;//NV_DOT( S[1][2] , n );
+													dot_prod[2][1] = -( SX[2][1]*n[0] + SY[2][1]*n[1] ) ;//NV_DOT( S[2][1] , n );
+													dot_prod[2][2] = -( SX[2][2]*n[0] + SY[2][2]*n[1] ) ;//NV_DOT( S[2][2] , n );
+													dot_prod[3][1] = -( SX[3][1]*n[0] + SY[3][1]*n[1] ) ;//NV_DOT( S[3][1] , n );
+													dot_prod[3][2] = -( SX[3][2]*n[0] + SY[3][2]*n[1] ) ;//NV_DOT( S[3][2] , n );
+
+													big = -1.0;
+																for( rr = 1; rr <= 3; rr++)
+																	for( cc = 1; cc <= 2; cc++)
+																	{
+																		if (dot_prod[rr][cc] > dot_prod[rr + 1][cc + 1])
+																		{
+																			big = dot_prod[rr][cc] *100000.0 ;
+																			n_row = rr;
+																			n_col = cc;
+						
+																			if(big != 0)
+																			{
+																	//			Message( " big, rr, cc = %g %d %d \n ", big, rr, cc);
+																			}
+
+																			if(rr == 1 && cc == 1)
+																			{
+																				cs = cf;
+																				ts = tf;
+																			}
+																			else if(rr == 1 && cc == 2)
+																			{
+																				cs = crf;
+																				ts = trf;
+																			}
+																			else if(rr == 2 && cc == 1)
+																			{
+																				cs = c;
+																				ts = t;
+																			}
+																			else if(rr == 2 && cc == 2)
+																			{
+																				cs = cr;
+																				ts = tr;
+																			}
+																			else if(rr == 3 && cc == 1)
+																			{
+																				cs = ca;
+																				ts = ta;
+																			}
+																			else if(rr == 3 && cc == 2)
+																			{
+																				cs = cra;
+																				ts = tra;
+																			}
+
+																		}
+																		else
+																		{
+																			big = big;
+																			n_row = n_row ;
+																			n_col = n_col ;
+																			cs = cs;
+																			ts = ts;
+
+
+																		}
+																	}
+														Message(" LHS n_row, n_col = %d %d \n ", n_row, n_col );
+												}
+												else if( fequal(XC[0], 0.00112365) && (XC[1] > 0.00003405) && (XC[1] < 0.0022473)  )			// PLEASE NOTE : THIS WILL CHANGE IN CASE GEOMETRY OF DOMAIN IS DIFFERENT FROM RECTANGULAR ONE(This refers to right boundary.)
+												{
+													C_CENTROID(X,c,t);
+													C_CENTROID(Xf,cf,tf);
+													C_CENTROID(Xl,cl,tl);		 
+													C_CENTROID(Xa,ca,ta);
+													C_CENTROID(Xlf,clf,tlf);
+													C_CENTROID(Xla,cla,tla);		
+
+													SX[1][1] = (X[0] - xi);
+													SX[1][2] = (Xf[0]  - xi);
+													SX[2][1] = (Xl[0]  - xi);
+													SX[2][2] = (Xa[0]   - xi);
+													SX[3][1] = (Xlf[0] - xi);
+													SX[3][2] = (Xla[0]  - xi);
+	
+													SY[1][1] = (X[1] - yi);
+													SY[1][2] = (Xf[1]  - yi);
+													SY[2][1] = (Xl[1]  - yi);
+													SY[2][2] = (Xa[1]   - yi);
+													SY[3][1] = (Xlf[1] - yi);
+													SY[3][2] = (Xla[1]  - yi);
+
+													DS[1][1] = sqrt(SX[1][1]*SX[1][1] + SY[1][1]*SY[1][1]) ;
+													DS[1][2] = sqrt(SX[1][2]*SX[1][2] + SY[1][2]*SY[1][2]) ;
+												//	DS[1][3] = sqrt(SX[1][3]*SX[1][3] + SY[1][3]*SY[1][3]) ;
+													DS[2][1] = sqrt(SX[2][1]*SX[2][1] + SY[2][1]*SY[2][1]) ;
+													DS[2][2] = sqrt(SX[2][2]*SX[2][2] + SY[2][2]*SY[2][2]) ;
+												//	DS[2][3] = sqrt(SX[2][3]*SX[2][3] + SY[2][3]*SY[2][3]) ;
+													DS[3][1] = sqrt(SX[3][1]*SX[3][1] + SY[3][1]*SY[3][1]) ;
+													DS[3][2] = sqrt(SX[3][2]*SX[3][2] + SY[3][2]*SY[3][2]) ;
+												//	DS[3][3] = sqrt(SX[3][3]*SX[3][3] + SY[3][3]*SY[3][3]) ;
+
+													SX[1][1] /= DS[1][1];
+													SX[1][2] /= DS[1][2];
+													SX[2][1] /= DS[2][1];
+													SX[2][2] /= DS[2][2];
+													SX[3][1] /= DS[3][1];
+													SX[3][2] /= DS[3][2];
+	
+													SY[1][1] /= DS[1][1];
+													SY[1][2] /= DS[1][2];
+													SY[2][1] /= DS[2][1];
+													SY[2][2] /= DS[2][2];
+													SY[3][1] /= DS[3][1];
+													SY[3][2] /= DS[3][2];
+
+													dot_prod[1][1] = -( SX[1][1]*n[0] + SY[1][1]*n[1] ) ;//NV_DOT( S[1][1] , n );
+													dot_prod[1][2] = -( SX[1][2]*n[0] + SY[1][2]*n[1] ) ;//NV_DOT( S[1][2] , n );
+													dot_prod[2][1] = -( SX[2][1]*n[0] + SY[2][1]*n[1] ) ;//NV_DOT( S[2][1] , n );
+													dot_prod[2][2] = -( SX[2][2]*n[0] + SY[2][2]*n[1] ) ;//NV_DOT( S[2][2] , n );
+													dot_prod[3][1] = -( SX[3][1]*n[0] + SY[3][1]*n[1] ) ;//NV_DOT( S[3][1] , n );
+													dot_prod[3][2] = -( SX[3][2]*n[0] + SY[3][2]*n[1] ) ;//NV_DOT( S[3][2] , n );
+
+													big = 0.0;
+
+																for( rr = 1; rr <= 3; rr++)
+																	for( cc = 1; cc <= 2; cc++)
+																	{
+																		if (dot_prod[rr][cc] > big )
+																		{
+																			big = dot_prod[rr][cc] ;
+																			n_row = rr;
+																			n_col = cc;
+						
+																			if(big != 0)
+																			{
+																	//			Message( " big, rr, cc = %g %d %d \n ", big, rr, cc);
+																			}
+
+																			if(rr == 1 && cc == 1)
+																			{
+																				cs = clf;
+																				ts = tlf;
+																			}
+																			else if(rr == 1 && cc == 2)
+																			{
+																				cs = cf;
+																				ts = tf;
+																			}
+																			else if(rr == 2 && cc == 1)
+																			{
+																				cs = cl;
+																				ts = tl;
+																			}
+																			else if(rr == 2 && cc == 2)
+																			{
+																				cs = c;
+																				ts = t;
+																			}
+																			else if(rr == 3 && cc == 1)
+																			{
+																				cs = cla;
+																				ts = tla;
+																			}
+																			else if(rr == 3 && cc == 2)
+																			{
+																				cs = ca;
+																				ts = ta;
+																			}
+
+																		}
+																		else
+																		{
+																			big = big;
+																			n_row = n_row ;
+																			n_col = n_col ;
+																			cs = cs;
+																			ts = ts;
+
+
+																		}
+																	}
+														Message(" RHS n_row, n_col = %d %d \n ", n_row, n_col );
+
+												}
+												else if( fequal(XC[1], 0.00001135) && (XC[0] > 0.0000227) && (XC[0] < 0.00112365) )// PLEASE NOTE : THIS WILL CHANGE IN CASE GEOMETRY OF DOMAIN IS DIFFERENT FROM RECTANGULAR ONE(This refers to bottom boundary.)
+												{
+													C_CENTROID(X,c,t);
+													C_CENTROID(Xr,cr,tr);
+													C_CENTROID(Xf,cf,tf);
+													C_CENTROID(Xl,cl,tl);
+													C_CENTROID(Xrf,crf,trf);
+													C_CENTROID(Xlf,clf,tlf);
+								
+													SX[1][1] = (Xlf[0] - xi);
+													SX[1][2] = (Xf[0]  - xi);
+													SX[1][3] = (Xrf[0] - xi);
+													SX[2][1] = (Xl[0]  - xi);
+													SX[2][2] = (X[0]   - xi);
+													SX[2][3] = (Xr[0]  - xi);
+	
+													SY[1][1] = (Xlf[1] - yi);
+													SY[1][2] = (Xf[1]  - yi);
+													SY[1][3] = (Xrf[1] - yi);
+													SY[2][1] = (Xl[1]  - yi);
+													SY[2][2] = (X[1]   - yi);
+													SY[2][3] = (Xr[1]  - yi);
+
+
+													DS[1][1] = sqrt(SX[1][1]*SX[1][1] + SY[1][1]*SY[1][1]) ;
+													DS[1][2] = sqrt(SX[1][2]*SX[1][2] + SY[1][2]*SY[1][2]) ;
+													DS[1][3] = sqrt(SX[1][3]*SX[1][3] + SY[1][3]*SY[1][3]) ;
+													DS[2][1] = sqrt(SX[2][1]*SX[2][1] + SY[2][1]*SY[2][1]) ;
+													DS[2][2] = sqrt(SX[2][2]*SX[2][2] + SY[2][2]*SY[2][2]) ;
+													DS[2][3] = sqrt(SX[2][3]*SX[2][3] + SY[2][3]*SY[2][3]) ;
+												//	DS[3][1] = sqrt(SX[3][1]*SX[3][1] + SY[3][1]*SY[3][1]) ;
+												//	DS[3][2] = sqrt(SX[3][2]*SX[3][2] + SY[3][2]*SY[3][2]) ;
+												//	DS[3][3] = sqrt(SX[3][3]*SX[3][3] + SY[3][3]*SY[3][3]) ;
+
+													SX[1][1] /= DS[1][1];
+													SX[1][2] /= DS[1][2];
+													SX[1][3] /= DS[1][3];
+													SX[2][1] /= DS[2][1];
+													SX[2][2] /= DS[2][2];
+													SX[2][3] /= DS[2][3];											
+											
+	
+													SY[1][1] /= DS[1][1];
+													SY[1][2] /= DS[1][2];
+													SY[1][3] /= DS[1][3];
+													SY[2][1] /= DS[2][1];
+													SY[2][2] /= DS[2][2];
+													SY[2][3] /= DS[2][3];											
+
+													dot_prod[1][1] = -( SX[1][1]*n[0] + SY[1][1]*n[1] ) ;//NV_DOT( S[1][1] , n );
+													dot_prod[1][2] = -( SX[1][2]*n[0] + SY[1][2]*n[1] ) ;//NV_DOT( S[1][2] , n );
+													dot_prod[1][3] = -( SX[1][3]*n[0] + SY[1][3]*n[1] ) ;//NV_DOT( S[3][1] , n );
+													dot_prod[2][1] = -( SX[2][1]*n[0] + SY[2][1]*n[1] ) ;//NV_DOT( S[2][1] , n );
+													dot_prod[2][2] = -( SX[2][2]*n[0] + SY[2][2]*n[1] ) ;//NV_DOT( S[2][2] , n );
+													dot_prod[2][3] = -( SX[2][3]*n[0] + SY[2][3]*n[1] ) ;//NV_DOT( S[3][2] , n );	
+
+													
+
+													big = -1.0;
+													for( rr = 1; rr <= 2; rr++)
+														for( cc = 1; cc <= 3; cc++)
+														{
+															if (dot_prod[rr][cc] > big)
+															{
+																big = dot_prod[rr][cc]  ;
+																n_row = rr;
+																n_col = cc;
+						
+																if(big != 0)
+																{
+														//			Message( " big, rr, cc = %g %d %d \n ", big, rr, cc);
+																}
+
+																if(rr == 1 && cc == 1)
+																{
+																	cs = clf;
+																	ts = tlf;
+																}
+																else if(rr == 1 && cc == 2)
+																{
+																	cs = cf;
+																	ts = tf;
+																}
+																else if(rr == 1 && cc == 3)
+																{
+																	cs = crf;
+																	ts = trf;
+																}
+																else if(rr == 2 && cc == 1)
+																{
+																	cs = cl;
+																	ts = tl;
+																}
+																else if(rr == 2 && cc == 2)
+																{
+																	cs = c;
+																	ts = t;
+																}
+																else if(rr == 2 && cc == 3)
+																{
+																	cs = cr;
+																	ts = tr;
+																}
+
+															}
+															else
+															{
+																big = big;
+																n_row = n_row;
+																n_col = n_col;
+																cs = cs;
+																ts = ts;
+										
+															}
+														}
+													Message(" B.B n_row, n_col = %d %d \n ", n_row, n_col );
+												}
+												else if( fequal(XC[1], 0.00225865) && (XC[0] > 0.0000227) && (XC[0] < 0.00112365) )					// PLEASE NOTE : THIS WILL CHANGE IN CASE GEOMETRY OF DOMAIN IS DIFFERENT FROM RECTANGULAR ONE(This refers to top boundary.)
+												{
+													C_CENTROID(X,c,t);
+													C_CENTROID(Xr,cr,tr);
+													C_CENTROID(Xl,cl,tl);		 
+													C_CENTROID(Xa,ca,ta);
+													C_CENTROID(Xla,cla,tla);				
+													C_CENTROID(Xra,cra,tra);
+											
+													SX[1][1] = (Xl[0] - xi);
+													SX[1][2] = (X[0]  - xi);
+													SX[1][3] = (Xr[0] - xi);
+													SX[2][1] = (Xla[0]  - xi);
+													SX[2][2] = (Xa[0]   - xi);
+													SX[2][3] = (Xra[0]  - xi);
+	
+													SY[1][1] = (Xl[1] - yi);
+													SY[1][2] = (X[1]  - yi);
+													SY[1][3] = (Xr[1] - yi);
+													SY[2][1] = (Xla[1]  - yi);
+													SY[2][2] = (Xa[1]   - yi);
+													SY[2][3] = (Xra[1]  - yi);
+
+
+													DS[1][1] = sqrt(SX[1][1]*SX[1][1] + SY[1][1]*SY[1][1]) ;
+													DS[1][2] = sqrt(SX[1][2]*SX[1][2] + SY[1][2]*SY[1][2]) ;
+													DS[1][3] = sqrt(SX[1][3]*SX[1][3] + SY[1][3]*SY[1][3]) ;
+													DS[2][1] = sqrt(SX[2][1]*SX[2][1] + SY[2][1]*SY[2][1]) ;
+													DS[2][2] = sqrt(SX[2][2]*SX[2][2] + SY[2][2]*SY[2][2]) ;
+													DS[2][3] = sqrt(SX[2][3]*SX[2][3] + SY[2][3]*SY[2][3]) ;
+												//	DS[3][1] = sqrt(SX[3][1]*SX[3][1] + SY[3][1]*SY[3][1]) ;
+												//	DS[3][2] = sqrt(SX[3][2]*SX[3][2] + SY[3][2]*SY[3][2]) ;
+												//	DS[3][3] = sqrt(SX[3][3]*SX[3][3] + SY[3][3]*SY[3][3]) ;
+
+													SX[1][1] /= DS[1][1];
+													SX[1][2] /= DS[1][2];
+													SX[1][3] /= DS[1][3];
+													SX[2][1] /= DS[2][1];
+													SX[2][2] /= DS[2][2];
+													SX[2][3] /= DS[2][3];											
+											
+	
+													SY[1][1] /= DS[1][1];
+													SY[1][2] /= DS[1][2];
+													SY[1][3] /= DS[1][3];
+													SY[2][1] /= DS[2][1];
+													SY[2][2] /= DS[2][2];
+													SY[2][3] /= DS[2][3];											
+
+													dot_prod[1][1] = -( SX[1][1]*n[0] + SY[1][1]*n[1] ) ;//NV_DOT( S[1][1] , n );
+													dot_prod[1][2] = -( SX[1][2]*n[0] + SY[1][2]*n[1] ) ;//NV_DOT( S[1][2] , n );
+													dot_prod[1][3] = -( SX[1][3]*n[0] + SY[1][3]*n[1] ) ;//NV_DOT( S[3][1] , n );
+													dot_prod[2][1] = -( SX[2][1]*n[0] + SY[2][1]*n[1] ) ;//NV_DOT( S[2][1] , n );
+													dot_prod[2][2] = -( SX[2][2]*n[0] + SY[2][2]*n[1] ) ;//NV_DOT( S[2][2] , n );
+													dot_prod[2][3] = -( SX[2][3]*n[0] + SY[2][3]*n[1] ) ;//NV_DOT( S[3][2] , n );	
+
+													big = -1.0;
+
+													for( rr = 1; rr <= 2; rr++)
+														for( cc = 1; cc <= 3; cc++)
+														{
+															if (dot_prod[rr][cc] > big)
+															{
+																big = dot_prod[rr][cc]  ;
+																n_row = rr;
+																n_col = cc;
+						
+																if(big != 0)
+																{
+														//			Message( " big, rr, cc = %g %d %d \n ", big, rr, cc);
+																}
+
+																if(rr == 1 && cc == 1)
+																{
+																	cs = cl;
+																	ts = tl;
+																}
+																else if(rr == 1 && cc == 2)
+																{
+																	cs = c;
+																	ts = t;
+																}
+																else if(rr == 1 && cc == 3)
+																{
+																	cs = cr;
+																	ts = tr;
+																}
+																else if(rr == 2 && cc == 1)
+																{
+																	cs = cla;
+																	ts = tla;
+																}
+																else if(rr == 2 && cc == 2)
+																{
+																	cs = ca;
+																	ts = ta;
+																}
+																else if(rr == 2 && cc == 3)
+																{
+																	cs = cra;
+																	ts = tra;
+																}
+
+															}
+															else
+															{
+																big = big ;
+																n_row = n_row;
+																n_col = n_col;
+																cs = cs;
+																ts = ts;
+										
+															}
+														}
+													Message(" T.B n_row, n_col = %d %d \n ", n_row, n_col );
+												}	
+										//		else
+										//		{
+										//			return 0.0;
+										//		}
+
+												
+										}
+										else								// PLEASE NOTE : THIS WILL REMAIN SAME FOR ALL GEOMETRIES. This part is for interior cells other than cells at boundaries.
+										{		
+														C_CENTROID(X,c,t);
+														C_CENTROID(Xr,cr,tr);
+														C_CENTROID(Xf,cf,tf);
+														C_CENTROID(Xl,cl,tl);		 
+														C_CENTROID(Xa,ca,ta);
+														C_CENTROID(Xrf,crf,trf);		
+														C_CENTROID(Xlf,clf,tlf);
+														C_CENTROID(Xla,cla,tla);				
+														C_CENTROID(Xra,cra,tra);
+
+//														Message(" X (clf, cf, crf, cl, c, cr, cla, ca, cra) =  %.10f %.10f %.10f \n %.10f %.10f %.10f \n %.10f %.10f %.10f \n ", Xlf[0], Xf[0], Xrf[0], Xl[0], X[0], Xr[0], Xla[0], Xa[0], Xra[0]);
+//														Message(" Y (clf, cf, crf, cl, c, cr, cla, ca, cra) =  %.10f %.10f %.10f \n %.10f %.10f %.10f \n %.10f %.10f %.10f \n ", Xlf[1], Xf[1], Xrf[1], Xl[1], X[1], Xr[1], Xla[1], Xa[1], Xra[1]);
+//														Message(" xi, yi = %.10f %.10f \n ", xi, yi );
+//														Message(" iphase = \n %f %f %f \n %f %f %f \n %f %f %f \n ", C_UDMI(clf,tlf,1),C_UDMI(cf,tf,1),C_UDMI(crf,trf,1),C_UDMI(cl,tl,1),C_UDMI(c,t,1),C_UDMI(cr,tr,1),C_UDMI(cla,tla,1),C_UDMI(ca,ta,1),C_UDMI(cra,tra,1));
+
+														SX[1][1] = (Xlf[0] - xi);
+														SX[1][2] = (Xf[0]  - xi);
+														SX[1][3] = (Xrf[0] - xi);
+														SX[2][1] = (Xl[0]  - xi);
+														SX[2][2] = 0.0 ; // (X[0] -xi); // 0.0;
+														SX[2][3] = (Xr[0]  - xi);
+														SX[3][1] = (Xla[0] - xi);
+														SX[3][2] = (Xa[0]  - xi);
+														SX[3][3] = (Xra[0] - xi);
+
+//														Message(" SX Matrix = \n %g %g %g \n %g %g %g \n %g %g %g \n ", SX[1][1],SX[1][2],SX[1][3],SX[2][1],SX[2][2],SX[2][3],SX[3][1],SX[3][2],SX[3][3]);
+
+														SY[1][1] = (Xlf[1] - yi);
+														SY[1][2] = (Xf[1]  - yi);
+														SY[1][3] = (Xrf[1] - yi);
+														SY[2][1] = (Xl[1]  - yi);
+														SY[2][2] = 0.0; // (X[1] - yi); // 0.0;
+														SY[2][3] = (Xr[1]  - yi);
+														SY[3][1] = (Xla[1] - yi);
+														SY[3][2] = (Xa[1]  - yi);
+														SY[3][3] = (Xra[1] - yi);
+
+//														Message(" SY Matrix = \n %g %g %g \n %g %g %g \n %g %g %g \n ", SY[1][1],SY[1][2],SY[1][3],SY[2][1],SY[2][2],SY[2][3],SY[3][1],SY[3][2],SY[3][3]);
+
+													DS[1][1] = sqrt(SX[1][1]*SX[1][1] + SY[1][1]*SY[1][1]) ;
+													DS[1][2] = sqrt(SX[1][2]*SX[1][2] + SY[1][2]*SY[1][2]) ;
+													DS[1][3] = sqrt(SX[1][3]*SX[1][3] + SY[1][3]*SY[1][3]) ;
+													DS[2][1] = sqrt(SX[2][1]*SX[2][1] + SY[2][1]*SY[2][1]) ;
+													DS[2][2] = 0.0 ; // sqrt(SX[2][2]*SX[2][2] + SY[2][2]*SY[2][2]) ; 
+													DS[2][3] = sqrt(SX[2][3]*SX[2][3] + SY[2][3]*SY[2][3]) ;
+													DS[3][1] = sqrt(SX[3][1]*SX[3][1] + SY[3][1]*SY[3][1]) ;
+													DS[3][2] = sqrt(SX[3][2]*SX[3][2] + SY[3][2]*SY[3][2]) ;
+													DS[3][3] = sqrt(SX[3][3]*SX[3][3] + SY[3][3]*SY[3][3]) ;
+
+													SX[1][1] /= DS[1][1];
+													SX[1][2] /= DS[1][2];
+													SX[1][3] /= DS[1][3];
+													SX[2][1] /= DS[2][1];
+													SX[2][2] = 0.0; 
+													SX[2][3] /= DS[2][3];											
+													SX[3][1] /= DS[3][1];
+													SX[3][2] /= DS[3][2];
+													SX[3][3] /= DS[3][3];												
+	
+													SY[1][1] /= DS[1][1];
+													SY[1][2] /= DS[1][2];
+													SY[1][3] /= DS[1][3];
+													SY[2][1] /= DS[2][1];
+													SY[2][2] = 0.0; 
+													SY[2][3] /= DS[2][3];
+													SY[3][1] /= DS[3][1];
+													SY[3][2] /= DS[3][2];
+													SY[3][3] /= DS[3][3];												
+
+										
+
+													dot_prod[1][1] = -( SX[1][1]*n[0] + SY[1][1]*n[1] ) ;//NV_DOT( S[1][1] , n );
+													dot_prod[1][2] = -( SX[1][2]*n[0] + SY[1][2]*n[1] ) ;//NV_DOT( S[1][2] , n );
+													dot_prod[1][3] = -( SX[1][3]*n[0] + SY[1][3]*n[1] ) ;//NV_DOT( S[3][1] , n );
+													dot_prod[2][1] = -( SX[2][1]*n[0] + SY[2][1]*n[1] ) ;//NV_DOT( S[2][1] , n );
+													dot_prod[2][2] = 0.0; //-( SX[2][2]*n[0] + SY[2][2]*n[1] ) ;//NV_DOT( S[2][2] , n );
+													dot_prod[2][3] = -( SX[2][3]*n[0] + SY[2][3]*n[1] ) ;//NV_DOT( S[3][2] , n );	
+													dot_prod[3][1] = -( SX[3][1]*n[0] + SY[3][1]*n[1] ) ;//NV_DOT( S[2][1] , n );
+													dot_prod[3][2] = -( SX[3][2]*n[0] + SY[3][2]*n[1] ) ;//NV_DOT( S[2][1] , n );
+													dot_prod[3][3] = -( SX[3][3]*n[0] + SY[3][3]*n[1] ) ;//NV_DOT( S[2][1] , n );
+		
+//			Message(" c, C_UDMI(c,t,1), n[0], n[1], DOT PROD = %u %f %.15f %.15f \n %g %g %g \n %g %g %g \n %g %g %g \n ", c, C_UDMI(c,t,1), n[0], n[1], dot_prod[1][1],dot_prod[1][2],dot_prod[1][3],dot_prod[2][1],dot_prod[2][2],dot_prod[2][3],dot_prod[3][1],dot_prod[3][2],dot_prod[3][3]);
+
+	
+													//	big = 0.0;
+	
+														big = -1.0;
+	
+														for( rr = 1; rr <= 3; rr++)
+															for( cc = 1; cc <= 3; cc++)
+															{
+													//			Message("rr,cc= %d %d \n", rr, cc);
+
+																if (dot_prod[rr][cc] > big)
+																{
+																	big = dot_prod[rr][cc] ;
+																	n_row = rr;
+																	n_col = cc;
+						
+																	if(big != 0.0)
+																	{
+															//			Message( " big, rr, cc = %g %d %d \n ", big, rr, cc);
+																	}
+
+																	if(rr == 1 && cc == 1)
+																	{
+																		cs = clf;
+																		ts = tlf;
+																	}
+																	else if(rr == 1 && cc == 2)
+																	{
+																		cs = cf;
+																		ts = tf;
+																	}
+																	else if(rr == 1 && cc == 3)
+																	{
+																		cs = crf;
+																		ts = trf;
+																	}
+																	else if(rr == 2 && cc == 1)
+																	{
+																		cs = cl;
+																		ts = tl;
+																	}
+																	else if(rr == 2 && cc == 2)
+																	{
+																		cs = c;
+																		ts = t;
+																	}
+																	else if(rr == 2 && cc == 3)
+																	{
+																		cs = cr;
+																		ts = tr;
+																	}
+																	else if(rr == 3 && cc == 1)
+																	{
+																		cs = cla;
+																		ts = tla;
+																	}
+																	else if(rr == 3 && cc == 2)
+																	{
+																		cs = ca;
+																		ts = ta;
+																	}
+																	else if(rr == 3 && cc == 3)
+																	{
+																		cs = cra;
+																		ts = tra;
+																	}
+																}
+																else
+																{
+																	big = big;
+																	n_row = n_row;
+																	n_col = n_col;
+																	cs = cs;
+																	ts = ts;
+
+																}
+
+
+															}
+										//		Message(" c, n_row, n_col = %u %d %d \n ", c, n_row, n_col );
+
+									}
+
+//								Message(" c, n_row, n_col = %u %d %d \n ", c, n_row, n_col );
+
+		if( n_row == 0 || n_col == 0 || n_row > 3 || n_col > 3 )
+		{
+			return  0.0;
+		}
+		else
+		{
+									sx = SX[n_row][n_col];
+									sy = SY[n_row][n_col];
+									ds = DS[n_row][n_col];	// sqrt(sx*sx + sy*sy); 
+								//	sx = sx/ds;
+								//	sy = sy/ds;
+
+//			NV_D(s , = , SX[n_row][n_col] , SY[n_row][n_col] , 0.0 );
+
+			kl = 0.5454;
+			kg = 0.5383;
+			keff = kl*C_VOF(c,t_liquid) + kg*C_VOF(c,t_vapour);
+
+			latent_heat = 276400.0;
+
+//			ds = NV_MAG(s);
+			
+
+
+			if ( fequal(ds , 0.0) )
+			{
+				source = 0.0;
+			}
+			else
+			{
+//				NV_VS(q_s, = , s , * , (kl*(TSAT - C_T(cs,ts))/ds) );
+
+//				q_n = NV_DOT(q_s , n);
+//			C_CENTROID(XCS, cs, ts);
+//			C_CENTROID(XC,c,t);
+//			Message(" c, cs, C_UDMI(cs,ts,1) , C_UDMI(c,t,1) = %u %u %f %f \n ", c, cs, C_UDMI(cs,t,1) , C_UDMI(c,t,1) );
+				q_n = sx*(keff*(TSAT - C_T(cs,t))/ds)*nx + sy*(keff*(TSAT - C_T(cs,t))/ds)*ny ; 
+				source = fabs(q_n / latent_heat ) ; 
+				
+//			Message("c, ds, C_T(cs,t), source  = %u %f %f %g \n ", c, ds, C_T(cs,t), source );
+	//			C_UDMI(c,t,6) = source;
+			}														
+	//		Message(" c, source = %u %g  \n ", c, source );
+	//		Message("last = %f %f %g %g %g %.20f \n ", SX[n_row][n_col], SY[n_row][n_col] , q_n, ((kl*(TSAT - C_T(cs,ts))/ds)/latent_heat) , ds , source );
+			return    source;		
+		}
+		
+			
+	
+	}
+	else
+	{
+		return 0.0;
+	}
+}
