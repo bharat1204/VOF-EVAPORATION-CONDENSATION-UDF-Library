@@ -1,0 +1,262 @@
+
+#include "udf.h"
+#include "sg.h"
+#include "sg_vof.h"
+#include "cxbool.h"
+
+/*--------- linseg function ----------- */
+/*    Computes the endpoints of the interface (xint,yint) and the
+      number of endpoints (nint)
+      bounded by the four lines xl, xr, ya, and yf
+      (xleft, xright, yaft, yfront)
+      The liquid-gas interface plane cuts through the volume at
+      a distance sleng from the point (xc,yc).  slen is measured such
+      that slen*(nx,ny) + (xbase,ybase) = (xc,yc).
+      The normal to the interface plane (into the liquid phase) 
+      is (nx,ny).
+  */
+// GRID GEOMETRY INDEPENDENT PART.
+extern void
+linseg(  cell_t c, Thread *t, real xl, real xr, real ya, real yf, real *xint1, real *xint2, real *yint1, real *yint2, int *iface_int1, int *iface_int2  )
+{
+	cell_t cr, cf, cl, ca, crf, cra, clf, cla ;
+	Thread *tf, *ta, *tr, *tl, *trf, *tra, *tlf, *tla ;
+
+	Thread *t_liquid;
+	face_t fr, ff, fl, fa;
+	Thread *tfr, *tff, *tfl, *tfa;
+	real xc[ND_ND], XR[ND_ND], XF[ND_ND], XL[ND_ND], XA[ND_ND] ;
+	real xi, yi;
+	real tx,ty;
+	real eps;
+	real slope,slopi;
+	real xtest, ytest, dot_prod;
+	real dot_prod_new, dot_prod_old;
+	real len, nx, ny;
+	real dx, dy ;
+
+	real xint[ND_ND], yint[ND_ND] ;
+	int nint;
+	int iphs;
+	int iface_int[ND_ND];
+/*		iface_int = 1  - bottom edge
+					2  - right edge
+			        3  - top edge
+                    4  - left edge                */
+				  
+				  
+				  iface_int[0] = 0;
+				  iface_int[1] = 0;
+
+				  eps = 0.000000001;
+
+				  iphs = C_UDMI(c,t,1); 
+				  nx = C_UDMI(c,t,2);
+				  ny = C_UDMI(c,t,3);
+				  len = C_UDMI(c,t,4);
+
+	//	    Message(" linseg c, nx, ny = %u %f %f \n ", c, nx, ny);
+
+	C_CENTROID(xc,c,t);
+	
+	delta( c, t, &dx, &dy );
+
+	tx = -ny;
+	ty = nx;
+
+	 xi = xc[0] - len * nx;
+     yi = xc[1] - len * ny;
+
+//	 Message(" xi = %f \n", xi);
+
+	 nint = 0;
+						*xint1			= 0.0;
+						*yint1			= 0.0;
+						*xint2			= 0.0;
+						*yint2			= 0.0;
+//	if( c == 1795 )
+//	{
+//		Message("c, nx, ny, xi, yi, xl, xr, ya, yf = %u %.15f %.15f %.15f %.15f %.15f %.15f %.15f %.15f \n", c, nx, ny, xi, yi, xl, xr, ya, yf);
+//	}
+
+	 
+	
+/* ====== switch to cases depending on slope ====== */
+
+		if( fabs(nx) < eps*dx )
+	    {
+		   if ( yi > ya  && yi < yf )
+		   {
+//			   Message("1 \n");
+			   			xint[0]			= xl;
+						yint[0]			= yi;
+						xint[1]			= xr;
+						yint[1]			= yi;
+						iface_int[0]	= 4;
+						iface_int[1]	= 2;
+						*xint1			= xint[0];
+						*yint1			= yint[0];
+						*xint2			= xint[1];
+						*yint2			= yint[1];
+						*iface_int1		= iface_int[0];
+						*iface_int2		= iface_int[1];
+						 nint			= 2;
+//						 if( c == 1795 )
+//						 {
+		//					 Message(" LINSEG (1)  %u %.15f %.15f %.15f %.15f \n", c, *xint1,*xint2,*yint1,*yint2 );
+//						 }
+		   }
+	    }
+		else if ( fabs(ny) < eps*dy )
+	    {
+		   if( xi > xl  && xi < xr )
+		   {
+//			   Message("2 \n");
+						xint[0]			= xi;
+						yint[0]			= ya;
+						xint[1]			= xi;
+						yint[1]			= yf;
+						iface_int[0]	= 1;
+						iface_int[1]	= 3;
+						*xint1			= xint[0];
+						*yint1			= yint[0];
+						*xint2			= xint[1];
+						*yint2			= yint[1];
+						*iface_int1		= iface_int[0];
+						*iface_int2		= iface_int[1];
+						nint			= 2;
+//						 if( c == 1795 )
+//						 {
+		//					 Message(" LINSEG (2)  %u %.15f %.15f %.15f %.15f \n", c, *xint1,*xint2,*yint1,*yint2 );
+//						 }
+		   }
+	   }
+	   else
+	   {
+						slope = - nx/ny;
+						slopi = - ny/nx;
+
+		/* ====== test top ====== */
+				ytest = yf;
+				xtest = slopi*( ytest - yi ) + xi;
+
+	//			Message("top iphase, nx, ny, slope, slopi, xc[0], xc[1], len, xi, yi,  ytest, xtest = %u %d %f %f %f %f %f %g %f %f %f %f %f \n ", c,iphs, nx, ny, slope, slopi, xc[0], xc[1], len, xi, yi, ytest, xtest);
+
+				if(  ( xtest >= xl )  &&  ( xtest <= xr )  )
+				{
+//					Message("3 \n");
+						nint					= nint + 1 ;
+						xint[nint - 1]			= xtest;
+						yint[nint - 1]			= ytest;
+						iface_int[nint - 1]		= 3;
+						*xint1			= xint[0];
+						*yint1			= yint[0];
+						*xint2			= xint[1];
+						*yint2			= yint[1];
+						*iface_int1		= iface_int[0];
+						*iface_int2		= iface_int[1];
+//						if( c == 1795 )
+//						 {
+	//						 Message(" LINSEG (3)  %u %.15f %.15f %.15f %.15f \n", c, *xint1,*xint2,*yint1,*yint2 );
+//						 }
+				}
+
+		/* ====== test bottom ====== */
+				ytest = ya;
+				xtest = slopi*( ytest - yi ) + xi;
+	//			Message("bottom nx, ny, slope, slopi, ytest, xtest = %u %f %f %f %f %f %f \n ", c, nx, ny, slope, slopi, ytest, xtest);
+			    if(  ( xtest >= xl )  &&  ( xtest <= xr ) )
+				{ 
+//					Message("4 \n");
+						nint					= nint + 1;
+						xint[nint - 1]			= xtest;
+						yint[nint - 1]			= ytest;
+						iface_int[nint - 1]	= 1;
+						*xint1			= xint[0];
+						*yint1			= yint[0];
+						*xint2			= xint[1];
+						*yint2			= yint[1];
+						*iface_int1		= iface_int[0];
+						*iface_int2		= iface_int[1];
+//						if( c == 1795 )
+//						 {
+	//						 Message(" LINSEG (4)  %u %.15f %.15f %.15f %.15f \n", c, *xint1,*xint2,*yint1,*yint2 );
+//						 }
+				}
+
+
+
+		/* ====== test left ======= */
+				if (  nint == 2  ) 
+				{
+					goto Hello;
+				}
+				xtest = xl ;
+				ytest = slope*( xtest - xi ) + yi;
+	//			Message("left nx, ny, slope, slopi, xtest, ytest = %u %f %f %f %f %f %f \n ", c, nx, ny, slope, slopi, xtest, ytest);
+				if(  ( ytest >= ya )  &&  ( ytest <= yf  ) )
+				{
+//					Message("5 \n");
+						nint					= nint + 1;
+						xint[nint - 1]			= xtest;
+						yint[nint - 1]			= ytest;
+						iface_int[nint - 1]		= 4;
+						*xint1					= xint[0];
+						*yint1					= yint[0];
+						*xint2					= xint[1];
+						*yint2					= yint[1];
+						*iface_int1				= iface_int[0];
+						*iface_int2				= iface_int[1];
+						
+//						if( c == 1795 )
+//						 {
+	//						 Message(" LINSEG (5)  %u %.15f %.15f %.15f %.15f \n", c, *xint1,*xint2,*yint1,*yint2 );
+//						 }
+
+						if(  nint  == 2  )
+						{
+							dot_prod_old = ( (xint[0])- xi )*tx + ( (yint[0])- yi )*ty;
+							dot_prod_new = ( xtest  - xi )*tx + ( ytest  - yi )*ty;
+							if ( dot_prod_new*dot_prod_old > 0.0 )
+							{
+								 nint = nint - 1;
+							}
+						}
+				}
+		/* ====== test right ====== */
+				if (  nint == 2  ) 
+				{
+					goto Hello;
+				}
+				xtest = xr ;
+				ytest = slope*( xtest - xi ) + yi;
+	//			Message(" right nx, ny, slope, slopi, ytest, xtest = %u %f %f %f %f %f %f \n ", c, nx, ny, slope, slopi, xtest, ytest);
+				if(  ( ytest >= ya )  &&  ( ytest <= yf ) )
+				{
+//					Message("6 \n");
+					nint					= nint + 1;
+					xint[nint - 1]			= xtest;
+					yint[nint - 1]			= ytest;
+					iface_int[nint - 1]		= 2;
+					*xint1					= xint[0];
+					*yint1					= yint[0];
+					*xint2					= xint[1];
+					*yint2					= yint[1];
+					*iface_int1				= iface_int[0];
+					*iface_int2				= iface_int[1];
+//						if( c == 1795 )
+//						 {
+	//						 Message(" LINSEG (6)  %u %.15f %.15f %.15f %.15f \n", c, *xint1,*xint2,*yint1,*yint2 );
+//						 }
+				}
+		/* ===== end of end-point switch statements ===== */
+	   Hello: ;
+		}
+//		Message(" LINSEG %u %.15f %.15f %.15f %.15f \n", c, *xint1,*xint2,*yint1,*yint2 );
+
+//		Message(" c, (*xint1), (*xint2), (*yint1), (*yint2), len, nx, ny, nint, iface_int[0] , iface_int[1] = %u %.15f %.15f %.15f %.15f %.15f %f %f %d %d %d \n " , c, (*xint1), (*xint2), (*yint1), (*yint2), len, nx, ny, nint, iface_int[0] , iface_int[1] );
+//		Message(" c, nint, iface_int[0] , iface_int[1] = %u %d %d %d \n " , c, nint, iface_int[0] , iface_int[1] );
+		
+
+
+}
