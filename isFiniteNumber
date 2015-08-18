@@ -1,0 +1,16 @@
+#include "udf.h"
+#include "sg.h"
+#include "sg_vof.h"
+#include "cxbool.h"
+
+
+extern void
+IsFiniteNumber(double x, cxboolean *INF) 
+{
+	*INF = TRUE;
+     if (x <= DBL_MAX && x >= -DBL_MAX)
+	 {
+		 *INF = FALSE;
+	 }
+	 return;
+}   
