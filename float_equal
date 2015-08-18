@@ -1,0 +1,18 @@
+#include "udf.h"
+#include "sg.h"
+#include "sg_vof.h"
+#include "cxbool.h"
+
+extern int 
+float_equal(float f1, float f2)
+{
+  float precision = 0.0000001;
+  if (((f1 - precision) < f2) && ((f1 + precision) > f2))
+   {
+    return 1;
+   }
+  else
+   {
+    return 0;
+   }
+ }
